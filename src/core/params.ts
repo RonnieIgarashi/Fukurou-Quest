@@ -41,17 +41,31 @@ export const CROPS: Record<CropId, { name: string; days: number; yield: number }
 /** 【確定】畑は地・水・火・風を均等に使って育つ。【仮】1区画が1日に使う量 */
 export const FARM_MANA_PER_PLOT_PER_DAY = 1;
 
-/** 【確定】白のマナは村の炉で火のマナに変わる。【仮】変化にかかる時間と炉の容量 */
+/** 【確定】白のマナは村の炉で火のマナに変わり、燃料が要る。【仮】変化にかかる時間・炉の容量・燃料の量 */
 export const FORGE = {
   CONVERT_MINUTES: 6 * MINUTES_PER_HOUR,
   CAPACITY: 4,
+  FUEL_PER_MANA: 1,
 } as const;
 
-/** 【仮】引っ越しの荷物（初期所持品）。プロトタイプでは村の外へ出られないため、畑を試せる量を持たせる */
+/** 素材。【確定】ウシを倒すと落ちる（肉・皮・毛・骨）。薪は森で集める想定 */
+export type GoodsId = 'wood' | 'meat' | 'hide' | 'hair' | 'bone';
+export const GOODS: Record<GoodsId, { name: string }> = {
+  wood: { name: '薪' },
+  meat: { name: '肉' },
+  hide: { name: '皮' },
+  hair: { name: '毛' },
+  bone: { name: '骨' },
+};
+/** 【確定】燃料になるもの（薪・毛・皮）。【仮】使う順番 */
+export const FUELS: GoodsId[] = ['wood', 'hair', 'hide'];
+
+/** 引っ越しの荷物（初期所持品）。初期のマナがあることは【確定】、量は【仮】 */
 export const START_INVENTORY = {
   seeds: { bean: 4, wheat: 2 },
   crops: { bean: 0, wheat: 0 },
   mana: { white: 8, earth: 6, water: 6, fire: 0, wind: 6 },
+  goods: { wood: 6, meat: 0, hide: 0, hair: 0, bone: 0 },
 } as const;
 
 /** 【仮】ももっちゅりんが村にやってくる日時 */

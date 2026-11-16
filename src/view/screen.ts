@@ -1,6 +1,8 @@
-// 画面への出力。ドット絵は 384x216 の内部画面に描いて整数倍で拡大し、
-// 文字と顔画像は拡大後の高解像度で上から描く（文字をくっきり、顔画像を滑らかに見せるため）。
-import { BASE_H, BASE_W, Ctx, makeCanvas } from './gfx.js';
+// 画面への出力。3枚を重ねる。
+//  1. フィールド：640x360 の内部画面に背景の絵とドット絵を描き、整数倍で拡大する
+//  2. UI（枠・カーソル）：384x216 の座標で、出力と同じ大きさのキャンバスに描く
+//  3. 文字と顔画像：出力の解像度でそのまま描く（くっきり・滑らかに見せるため）
+import { BASE_H, BASE_W, Ctx, makeCanvas, VIEW_H, VIEW_W } from './gfx.js';
 
 export const FONT = '"DotGothic16", "MS Gothic", "Osaka-Mono", monospace';
 
@@ -28,18 +30,26 @@ interface ImageCmd {
 }
 
 export class Screen {
-  readonly base: Ctx;
-  private readonly baseCanvas: HTMLCanvasElement;
+  /** フィールド（640x360） */
+  readonly world: Ctx;
+  private readonly worldCanvas: HTMLCanvasElement;
+  /** UI（384x216 の座標） */
+  base: Ctx;
+  private uiCanvas: HTMLCanvasElement;
   private readonly out: Ctx;
+  /** フィールドの拡大率（整数） */
+  private viewScale = 1;
+  /** UI の拡大率（出力の幅 / 384） */
   private scale = 1;
   private texts: TextCmd[] = [];
   private images: ImageCmd[] = [];
   private readonly measure: Ctx;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
-    const [bc, b] = makeCanvas(BASE_W, BASE_H);
-    this.baseCanvas = bc;
-    this.base = b;
+    const [wc, w] = makeCanvas(VIEW_W, VIEW_H);
+    this.worldCanvas = wc;
+    this.world = w;
+    [this.uiCanvas, this.base] = makeCanvas(BASE_W, BASE_H);
     this.out = canvas.getContext('2d')!;
     this.measure = makeCanvas(8, 8)[1];
     this.resize();
@@ -52,9 +62,11 @@ export class Screen {
     const wrap = this.canvas.parentElement!;
     const availW = wrap.clientWidth * dpr;
     const availH = wrap.clientHeight * dpr;
-    this.scale = Math.max(1, Math.floor(Math.min(availW / BASE_W, availH / BASE_H)));
-    this.canvas.width = BASE_W * this.scale;
-    this.canvas.height = BASE_H * this.scale;
+    this.viewScale = Math.max(1, Math.floor(Math.min(availW / VIEW_W, availH / VIEW_H)));
+    this.canvas.width = VIEW_W * this.viewScale;
+    this.canvas.height = VIEW_H * this.viewScale;
+    this.scale = this.canvas.width / BASE_W;
+    [this.uiCanvas, this.base] = makeCanvas(this.canvas.width, this.canvas.height);
     this.canvas.style.width = `${this.canvas.width / dpr}px`;
     this.canvas.style.height = `${this.canvas.height / dpr}px`;
   }
@@ -62,10 +74,15 @@ export class Screen {
   begin(): Ctx {
     this.texts = [];
     this.images = [];
-    this.base.globalAlpha = 1;
-    this.base.globalCompositeOperation = 'source-over';
-    this.base.fillStyle = '#0e0c1c';
-    this.base.fillRect(0, 0, BASE_W, BASE_H);
+    for (const c of [this.world, this.base]) {
+      c.setTransform(1, 0, 0, 1, 0, 0);
+      c.globalAlpha = 1;
+      c.globalCompositeOperation = 'source-over';
+    }
+    this.world.fillStyle = '#0e0c1c';
+    this.world.fillRect(0, 0, VIEW_W, VIEW_H);
+    this.base.clearRect(0, 0, this.uiCanvas.width, this.uiCanvas.height);
+    this.base.setTransform(this.scale, 0, 0, this.scale, 0, 0);
     return this.base;
   }
 
@@ -113,7 +130,8 @@ export class Screen {
     const s = this.scale;
     const o = this.out;
     o.imageSmoothingEnabled = false;
-    o.drawImage(this.baseCanvas, 0, 0, BASE_W * s, BASE_H * s);
+    o.drawImage(this.worldCanvas, 0, 0, this.canvas.width, this.canvas.height);
+    o.drawImage(this.uiCanvas, 0, 0);
     o.imageSmoothingEnabled = true;
     for (const im of this.images) o.drawImage(im.img, im.x * s, im.y * s, im.w * s, im.h * s);
     o.textBaseline = 'top';

@@ -1,27 +1,12 @@
-// フィールドの描画：地面 → 物と人物（足元の y で前後を決める）→ 時刻の光 → 周辺減光。
+// フィールドの描画：背景の一枚絵 → 畑 → 物と人物（足元の y で前後を決める。絵の建物や木は OCCLUDERS で手前に重ねる）
+// → 時刻の光 → 周辺減光。座標は村の絵の px（1:1）、画面は 640x360。
 import { hourFloat } from '../core/clock.js';
-import { FORGE_AT, HUT, MAP_H, MAP_W, SIGN_AT, TILE, tileAt, TILES, tileHash } from '../core/map.js';
+import { OCCLUDERS, PLOTS, Poly, WINDOWS, WORLD_H, WORLD_W } from '../core/map.js';
+import { CROPS, CropId } from '../core/params.js';
 import { mokuAsleep, momoAsleep } from '../core/sim.js';
-import { Companion, GameState } from '../core/state.js';
-import { BASE_H, BASE_W, Ctx, drawAtFeet, drawShadow, makeCanvas, spriteImage } from './gfx.js';
+import { Companion, GameState, Plot } from '../core/state.js';
+import { Ctx, drawAtFeet, drawShadow, makeCanvas, rng, spriteImage, VIEW_H, VIEW_W } from './gfx.js';
 import { MOKU, MOMO, PLAYER, ZZZ } from './sprites.js';
-import {
-  bridgeTile,
-  drawCrop,
-  drawForgeFire,
-  drawWater,
-  flowerTile,
-  forgeImage,
-  grassTile,
-  HUT_WINDOWS,
-  hutImage,
-  pathTile,
-  plotTile,
-  rockImage,
-  sandTile,
-  signImage,
-  treeImage,
-} from './tiles.js';
 
 export interface Camera {
   x: number;
@@ -35,64 +20,175 @@ export interface PlayerAnim {
   walked: number;
 }
 
-let ground: HTMLCanvasElement | null = null;
+// ---------------------------------------------------------------- 背景の絵
 
-/** 動かない地面を1枚の画像にしておく（水と畑は毎フレーム描く） */
-function groundLayer(): HTMLCanvasElement {
-  if (ground) return ground;
-  const [c, ctx] = makeCanvas(MAP_W * TILE, MAP_H * TILE);
-  for (let y = 0; y < MAP_H; y++)
-    for (let x = 0; x < MAP_W; x++) {
-      const v = Math.floor(tileHash(x, y, 3) * 12);
-      const tile = TILES[y][x];
-      const px = x * TILE;
-      const py = y * TILE;
-      if (tile === 'flower') ctx.drawImage(flowerTile(v), px, py);
-      else if (tile === 'path') ctx.drawImage(pathTile(v), px, py);
-      else if (tile === 'sand') ctx.drawImage(sandTile(v), px, py);
-      else if (tile === 'bridge') ctx.drawImage(bridgeTile(), px, py);
-      else ctx.drawImage(grassTile(v), px, py);
-    }
-  // 道と草の境目に、草の縁取りを少し落とす
-  ctx.fillStyle = 'rgba(60, 110, 40, 0.35)';
-  for (let y = 0; y < MAP_H; y++)
-    for (let x = 0; x < MAP_W; x++) {
-      if (TILES[y][x] !== 'path') continue;
-      if (y > 0 && TILES[y - 1][x] !== 'path') ctx.fillRect(x * TILE, y * TILE, TILE, 1);
-      if (x > 0 && TILES[y][x - 1] !== 'path' && TILES[y][x - 1] !== 'bridge') ctx.fillRect(x * TILE, y * TILE, 1, TILE);
-    }
-  ground = c;
-  return c;
+const MAP_URL = 'assets/maps/village.jpg';
+let bg: HTMLImageElement | null = null;
+let bgReady = false;
+let cutouts: { img: HTMLCanvasElement; x: number; y: number; baseY: number }[] = [];
+
+function bounds(poly: Poly): { x0: number; y0: number; x1: number; y1: number } {
+  const xs = poly.map((p) => p[0]);
+  const ys = poly.map((p) => p[1]);
+  return { x0: Math.floor(Math.min(...xs)), y0: Math.floor(Math.min(...ys)), x1: Math.ceil(Math.max(...xs)), y1: Math.ceil(Math.max(...ys)) };
+}
+
+/** 背景の絵を読み込み、手前に来る物（建物・木など）を切り抜いておく */
+export function loadWorldArt(): void {
+  if (bg) return;
+  bg = new Image();
+  bg.onload = () => {
+    bgReady = true;
+    cutouts = OCCLUDERS.map((o) => {
+      const b = bounds(o.poly);
+      const [c, ctx] = makeCanvas(b.x1 - b.x0, b.y1 - b.y0);
+      ctx.beginPath();
+      o.poly.forEach(([x, y], i) => (i ? ctx.lineTo(x - b.x0, y - b.y0) : ctx.moveTo(x - b.x0, y - b.y0)));
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(bg!, -b.x0, -b.y0);
+      return { img: c, x: b.x0, y: b.y0, baseY: o.baseY };
+    });
+  };
+  bg.src = MAP_URL;
 }
 
 export function cameraFor(s: GameState): Camera {
-  const maxX = MAP_W * TILE - BASE_W;
-  const maxY = MAP_H * TILE - BASE_H;
   return {
-    x: Math.round(Math.max(0, Math.min(maxX, s.player.x - BASE_W / 2))),
-    y: Math.round(Math.max(0, Math.min(maxY, s.player.y - 12 - BASE_H / 2))),
+    x: Math.round(Math.max(0, Math.min(WORLD_W - VIEW_W, s.player.x - VIEW_W / 2))),
+    y: Math.round(Math.max(0, Math.min(WORLD_H - VIEW_H, s.player.y - 24 - VIEW_H / 2))),
   };
 }
+
+// ---------------------------------------------------------------- 畑
+
+const plotCache = new Map<string, HTMLCanvasElement>();
+
+/** 区画の土（絵の畝の上に重ねる）。縁は少しぼかして、背景の絵になじませる */
+function plotImage(i: number, tilled: boolean): HTMLCanvasElement {
+  const key = `${i}:${tilled}`;
+  const hit = plotCache.get(key);
+  if (hit) return hit;
+  const p = PLOTS[i];
+  const w = p.x1 - p.x0;
+  const h = p.y1 - p.y0;
+  const [c, ctx] = makeCanvas(w, h);
+  const r = rng(1000 + i * 7 + (tilled ? 1 : 0));
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      const edge = Math.min(x, y, w - 1 - x, h - 1 - y);
+      if (edge < 2 && r() < 0.5 - edge * 0.2) continue;
+      const n = r();
+      let col: string;
+      if (tilled) {
+        // 横の畝（明るい筋と暗い溝）
+        const row = y % 8;
+        col = row < 2 ? '#5e4030' : row < 5 ? (n < 0.3 ? '#8a6244' : '#80583a') : n < 0.2 ? '#6c4a34' : '#704c32';
+      } else {
+        // 耕していない土：草まじり
+        col = n < 0.08 ? '#82a050' : n < 0.5 ? '#8c6c4c' : n < 0.85 ? '#86664a' : '#7a5c40';
+      }
+      ctx.fillStyle = col;
+      ctx.fillRect(x, y, 1, 1);
+    }
+  if (!tilled) {
+    // 雑草の小さな株
+    for (let k = 0; k < 9; k++) {
+      const x = 4 + Math.floor(r() * (w - 8));
+      const y = 5 + Math.floor(r() * (h - 8));
+      ctx.fillStyle = '#4f7a2e';
+      ctx.fillRect(x, y - 3, 1, 3);
+      ctx.fillRect(x - 1, y - 2, 1, 1);
+      ctx.fillRect(x + 1, y - 2, 1, 1);
+      ctx.fillStyle = '#93c25a';
+      ctx.fillRect(x, y - 4, 1, 1);
+    }
+  }
+  plotCache.set(key, c);
+  return c;
+}
+
+/** 作物1株（足元 x, y）。stage 0 芽 / 1 若葉 / 2 育ち / 3 収穫どき */
+function drawPlant(ctx: Ctx, crop: CropId, stage: number, x: number, y: number, stalled: boolean): void {
+  const leaf = stalled ? '#9a9450' : '#5cbf4a';
+  const dark = stalled ? '#6e6a38' : '#2f7a2c';
+  const light = stalled ? '#b8b070' : '#9be26a';
+  const px = (dx: number, dy: number, c: string, w = 1, h = 1) => {
+    ctx.fillStyle = c;
+    ctx.fillRect(x + dx, y + dy, w, h);
+  };
+  if (stage === 0) {
+    px(0, -3, dark, 1, 3);
+    px(-2, -5, leaf, 2, 2);
+    px(1, -5, leaf, 2, 2);
+    px(-2, -5, light);
+    return;
+  }
+  const h = stage === 1 ? 9 : 15;
+  px(0, -h, dark, 1, h);
+  for (let k = 3; k < h; k += 3) {
+    const side = (k / 3) % 2 === 0 ? -1 : 1;
+    if (crop === 'bean') {
+      px(side < 0 ? -4 : 1, -k - 1, leaf, 3, 2);
+      px(side < 0 ? -4 : 1, -k - 1, light);
+    } else {
+      px(side < 0 ? -3 : 1, -k, leaf, 3, 1);
+      px(side < 0 ? -4 : 3, -k - 1, leaf);
+    }
+  }
+  if (stage >= 2 && crop === 'wheat') {
+    // 麦の穂
+    const ripe = stage === 3;
+    px(-1, -h - 5, ripe ? '#f0c850' : '#a8c860', 3, 5);
+    px(0, -h - 7, ripe ? '#ffe08a' : '#c8e080', 1, 2);
+    px(-1, -h - 5, ripe ? '#c89a2a' : '#7ea040');
+  }
+  if (stage === 3 && crop === 'bean') {
+    // 豆のさや
+    px(-4, -8, '#b6e070', 2, 5);
+    px(3, -11, '#b6e070', 2, 5);
+    px(-4, -8, '#e8ffb0');
+    px(3, -11, '#e8ffb0');
+  }
+}
+
+function drawPlot(ctx: Ctx, i: number, p: Plot, cam: Camera, items: Drawable[]): void {
+  const r = PLOTS[i];
+  ctx.drawImage(plotImage(i, p.stage !== 'wild'), r.x0 - cam.x, r.y0 - cam.y);
+  if (!p.crop) return;
+  const crop = p.crop;
+  const stage = p.stage === 'ready' ? 3 : Math.min(2, Math.floor((p.growth / CROPS[crop].days) * 3));
+  // 1区画に3列x3段で植える
+  for (let row = 0; row < 3; row++)
+    for (let col = 0; col < 3; col++) {
+      const x = Math.round(r.x0 + ((col + 0.5) * (r.x1 - r.x0)) / 3 + (row % 2) * 2 - cam.x);
+      const fy = r.y0 + ((row + 0.85) * (r.y1 - r.y0)) / 3;
+      const y = Math.round(fy - cam.y);
+      items.push({ y: fy, draw: (c) => drawPlant(c, crop, stage, x, y, p.stalled) });
+    }
+}
+
+// ---------------------------------------------------------------- 人物
 
 type Drawable = { y: number; draw: (ctx: Ctx) => void };
 
 function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean, t: number, cam: Camera): Drawable {
   const x = c.x - cam.x;
   // 飛べる2匹なので、起きているときはふわふわ浮く
-  const float = asleep ? 0 : Math.round(Math.sin(t * 4 + (kind === 'moku' ? 0 : 2)) * 1.5) - 2;
+  const float = asleep ? 0 : Math.round(Math.sin(t * 4 + (kind === 'moku' ? 0 : 2)) * 2) - (kind === 'momo' ? 10 : 3);
   const y = c.y - cam.y;
   return {
     y: c.y,
     draw: (ctx) => {
-      drawShadow(ctx, x, y, 10);
+      drawShadow(ctx, x, y, asleep ? 20 : 16);
       const frames = kind === 'moku' ? MOKU : MOMO;
       let def = asleep ? frames.sleep : frames.idle;
-      if (!asleep && Math.floor(t * 3) % 4 === 0) def = kind === 'moku' ? MOKU.hop : MOMO.flap;
-      drawAtFeet(ctx, def, x, y + float, c.dir === 'left');
+      if (!asleep && Math.floor(t * (kind === 'momo' ? 8 : 3)) % (kind === 'momo' ? 2 : 4) === 0) def = kind === 'moku' ? MOKU.hop : MOMO.flap;
+      drawAtFeet(ctx, def, x, y + float + 1, c.dir === 'left');
       if (asleep) {
         const z = Math.floor(t * 1.5) % 3;
         ctx.globalAlpha = 0.85;
-        ctx.drawImage(spriteImage(ZZZ), Math.round(x + 4 + z), Math.round(y - 20 - z * 3));
+        ctx.drawImage(spriteImage(ZZZ), Math.round(x + 8 + z * 2), Math.round(y - 38 - z * 5));
         ctx.globalAlpha = 1;
       }
     },
@@ -146,12 +242,12 @@ function glow(ctx: Ctx, x: number, y: number, r: number, color: string, alpha: n
 let vignette: HTMLCanvasElement | null = null;
 function vignetteLayer(): HTMLCanvasElement {
   if (!vignette) {
-    const [c, ctx] = makeCanvas(BASE_W, BASE_H);
-    const g = ctx.createRadialGradient(BASE_W / 2, BASE_H / 2, BASE_H * 0.45, BASE_W / 2, BASE_H / 2, BASE_W * 0.62);
+    const [c, ctx] = makeCanvas(VIEW_W, VIEW_H);
+    const g = ctx.createRadialGradient(VIEW_W / 2, VIEW_H / 2, VIEW_H * 0.45, VIEW_W / 2, VIEW_H / 2, VIEW_W * 0.62);
     g.addColorStop(0, 'rgba(10, 8, 24, 0)');
-    g.addColorStop(1, 'rgba(10, 8, 24, 0.45)');
+    g.addColorStop(1, 'rgba(10, 8, 24, 0.4)');
     ctx.fillStyle = g;
-    ctx.fillRect(0, 0, BASE_W, BASE_H);
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     vignette = c;
   }
   return vignette;
@@ -160,51 +256,19 @@ function vignetteLayer(): HTMLCanvasElement {
 // ---------------------------------------------------------------- 本体
 
 export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, clock = s.clock): Camera {
+  loadWorldArt();
   const cam = cameraFor(s);
-  ctx.drawImage(groundLayer(), -cam.x, -cam.y);
-
-  const x0 = Math.max(0, Math.floor(cam.x / TILE) - 1);
-  const y0 = Math.max(0, Math.floor(cam.y / TILE) - 1);
-  const x1 = Math.min(MAP_W - 1, Math.ceil((cam.x + BASE_W) / TILE) + 1);
-  const y1 = Math.min(MAP_H - 1, Math.ceil((cam.y + BASE_H) / TILE) + 3);
-  const waterFrame = Math.floor(t * 3) % 8;
-
-  const items: Drawable[] = [];
-  for (let y = y0; y <= y1; y++)
-    for (let x = x0; x <= x1; x++) {
-      const tile = tileAt(x, y);
-      const px = x * TILE - cam.x;
-      const py = y * TILE - cam.y;
-      if (tile === 'water') drawWater(ctx, px, py, waterFrame, x, y);
-      else if (tile === 'tree') {
-        const v = Math.floor(tileHash(x, y, 5) * 3);
-        items.push({ y: (y + 1) * TILE, draw: (c) => c.drawImage(treeImage(v), px - 4, py + TILE - 34) });
-      } else if (tile === 'rock') items.push({ y: (y + 1) * TILE - 2, draw: (c) => c.drawImage(rockImage(), px, py) });
-      else if (tile === 'sign' && x === SIGN_AT.tx) items.push({ y: (y + 1) * TILE, draw: (c) => c.drawImage(signImage(), px, py - 4) });
-    }
-
-  // 畑
-  for (const p of s.plots) {
-    const px = p.tx * TILE - cam.x;
-    const py = p.ty * TILE - cam.y;
-    ctx.drawImage(plotTile(p.stage !== 'wild'), px, py);
-    if (p.crop) items.push({ y: (p.ty + 1) * TILE - 2, draw: (c) => drawCrop(c, p.crop!, p.growth, p.stage === 'ready', px + 8, py + 14, p.stalled) });
+  if (bgReady && bg) ctx.drawImage(bg, cam.x, cam.y, VIEW_W, VIEW_H, 0, 0, VIEW_W, VIEW_H);
+  else {
+    ctx.fillStyle = '#9cbf6a';
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
   }
 
-  // 小屋と炉
-  const hutX = HUT.tx * TILE - cam.x;
-  const hutY = (HUT.ty + HUT.h) * TILE - 64 - cam.y;
-  items.push({ y: (HUT.ty + HUT.h) * TILE - 1, draw: (c) => c.drawImage(hutImage(), hutX, hutY) });
-  const fX = FORGE_AT.tx * TILE - cam.x;
-  const fY = (FORGE_AT.ty + FORGE_AT.h) * TILE - 44 - cam.y;
-  const forgeBusy = s.forge.queue.length > 0 || s.forge.ready > 0;
-  items.push({
-    y: (FORGE_AT.ty + FORGE_AT.h) * TILE - 1,
-    draw: (c) => {
-      c.drawImage(forgeImage(), fX, fY);
-      drawForgeFire(c, fX, fY, t, forgeBusy);
-    },
-  });
+  const items: Drawable[] = [];
+  s.plots.forEach((p, i) => drawPlot(ctx, i, p, cam, items));
+
+  // 手前に来る絵（建物・木・噴水）
+  for (const c of cutouts) items.push({ y: c.baseY, draw: (g) => g.drawImage(c.img, c.x - cam.x, c.y - cam.y) });
 
   // 仲間
   const moku = s.companions.moku;
@@ -215,12 +279,12 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
   // 主人公
   const p = s.player;
   const facing = p.dir === 'left' || p.dir === 'right' ? 'side' : p.dir;
-  const step = anim.moving ? Math.floor(anim.walked / 6) % 4 : 0;
+  const step = anim.moving ? Math.floor(anim.walked / 9) % 4 : 0;
   items.push({
     y: p.y,
     draw: (c) => {
-      drawShadow(c, p.x - cam.x, p.y - cam.y, 12);
-      drawAtFeet(c, PLAYER[facing][step], p.x - cam.x, p.y - cam.y + 1, p.dir === 'left');
+      drawShadow(c, p.x - cam.x, p.y - cam.y, 22);
+      drawAtFeet(c, PLAYER[facing][step], p.x - cam.x, p.y - cam.y + 2, p.dir === 'left');
     },
   });
 
@@ -233,28 +297,34 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
   if (r + g + b < 765) {
     ctx.globalCompositeOperation = 'multiply';
     ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-    ctx.fillRect(0, 0, BASE_W, BASE_H);
+    ctx.fillRect(0, 0, VIEW_W, VIEW_H);
     ctx.globalCompositeOperation = 'source-over';
   }
   const dark = darkness(hour);
+  const forgeBusy = s.forge.queue.length > 0 || s.forge.ready > 0;
   if (dark > 0.15) {
     ctx.globalCompositeOperation = 'lighter';
-    for (const w of HUT_WINDOWS) {
-      ctx.fillStyle = `rgba(255, 200, 110, ${0.7 * dark})`;
-      ctx.fillRect(hutX + w.x - 3, hutY + w.y - 3, 7, 7);
-      glow(ctx, hutX + w.x, hutY + w.y + 6, 34, 'rgba(255, 170, 80, A)', 0.35 * dark);
+    for (const w of WINDOWS.hut) {
+      glow(ctx, w.x - cam.x, w.y - cam.y, 10, 'rgba(255, 210, 120, A)', 0.8 * dark);
+      glow(ctx, w.x - cam.x, w.y - cam.y + 14, 46, 'rgba(255, 170, 80, A)', 0.3 * dark);
     }
-    glow(ctx, fX + 16, fY + 34, forgeBusy ? 46 : 26, 'rgba(255, 120, 40, A)', (forgeBusy ? 0.45 : 0.2) * dark);
-    // ホタル
-    for (let i = 0; i < 14; i++) {
-      const fx = ((i * 97 + Math.sin(t * 0.7 + i) * 30) % (MAP_W * TILE)) - cam.x;
-      const fy = ((i * 53 + 120 + Math.cos(t * 0.5 + i * 2) * 20) % (MAP_H * TILE)) - cam.y;
+    glow(ctx, WINDOWS.forge.x - cam.x, WINDOWS.forge.y - cam.y, forgeBusy ? 14 : 8, 'rgba(255, 140, 60, A)', (forgeBusy ? 0.9 : 0.5) * dark);
+    glow(ctx, WINDOWS.forge.x - cam.x, WINDOWS.forge.y - cam.y + 20, forgeBusy ? 70 : 36, 'rgba(255, 110, 40, A)', (forgeBusy ? 0.4 : 0.18) * dark);
+    // ホタル（広場と川べり）
+    for (let i = 0; i < 40; i++) {
+      const fx = 400 + ((i * 397) % 1300) + Math.sin(t * 0.7 + i) * 30 - cam.x;
+      const fy = 680 + ((i * 211) % 520) + Math.cos(t * 0.5 + i * 2) * 20 - cam.y;
       const blink = (Math.sin(t * 2 + i * 1.7) + 1) / 2;
-      if (fx < -8 || fy < -8 || fx > BASE_W + 8 || fy > BASE_H + 8) continue;
-      glow(ctx, fx, fy, 6, 'rgba(210, 255, 140, A)', 0.5 * blink * dark);
+      if (fx < -8 || fy < -8 || fx > VIEW_W + 8 || fy > VIEW_H + 8) continue;
+      glow(ctx, fx, fy, 8, 'rgba(210, 255, 140, A)', 0.5 * blink * dark);
       ctx.fillStyle = `rgba(240, 255, 200, ${blink * dark})`;
       ctx.fillRect(Math.round(fx), Math.round(fy), 1, 1);
     }
+    ctx.globalCompositeOperation = 'source-over';
+  } else if (forgeBusy) {
+    // 昼でも、炉が動いていれば窓がほんのり赤い
+    ctx.globalCompositeOperation = 'lighter';
+    glow(ctx, WINDOWS.forge.x - cam.x, WINDOWS.forge.y - cam.y, 10, 'rgba(255, 120, 50, A)', 0.35 + 0.1 * Math.sin(t * 6));
     ctx.globalCompositeOperation = 'source-over';
   }
   ctx.drawImage(vignetteLayer(), 0, 0);

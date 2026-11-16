@@ -18,11 +18,11 @@ test('ドット絵はすべて四角く、パレットにある色だけを使�
   check('ZZZ', ZZZ);
 });
 
-test('主人公は 16x24、仲間は 16x16', () => {
-  assert.equal(PLAYER.down[0].w, 16);
-  assert.equal(PLAYER.down[0].h, 24);
-  assert.equal(MOKU.idle.h, 16);
-  assert.equal(MOMO.idle.h, 16);
+test('主人公は 32x48、仲間は 32x32', () => {
+  assert.equal(PLAYER.down[0].w, 32);
+  assert.equal(PLAYER.down[0].h, 48);
+  assert.equal(MOKU.idle.h, 32);
+  assert.equal(MOMO.idle.h, 32);
 });
 
 test('歩きのコマは止まっている絵と違う', () => {

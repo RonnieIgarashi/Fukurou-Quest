@@ -3,7 +3,10 @@ import { PALETTE, SpriteDef } from './sprites.js';
 
 export type Ctx = CanvasRenderingContext2D;
 
-/** 内部解像度（【確定】384x216 の 16:9） */
+/** 画面（フィールド）の内部解像度。【確定】640x360 の 16:9。背景の絵とドット絵はこの解像度で描いて整数倍に拡大する */
+export const VIEW_W = 640;
+export const VIEW_H = 360;
+/** メニュー・会話などの UI の座標系（384x216）。出力の大きさに合わせて拡大して描く */
 export const BASE_W = 384;
 export const BASE_H = 216;
 
@@ -45,12 +48,15 @@ export function drawAtFeet(ctx: Ctx, def: SpriteDef, x: number, y: number, mirro
   ctx.drawImage(spriteImage(def, mirror), Math.round(x - def.w / 2), Math.round(y - def.h));
 }
 
-/** 足元の影 */
+/** 足元の影（だ円） */
 export function drawShadow(ctx: Ctx, x: number, y: number, w: number): void {
-  ctx.fillStyle = 'rgba(20, 16, 40, 0.28)';
-  const rx = Math.round(x - w / 2);
-  ctx.fillRect(rx + 1, Math.round(y - 1), w - 2, 2);
-  ctx.fillRect(rx, Math.round(y), w, 1);
+  ctx.fillStyle = 'rgba(30, 24, 40, 0.3)';
+  const h = Math.max(2, Math.round(w / 4));
+  for (let j = 0; j < h; j++) {
+    const k = (j + 0.5) / h - 0.5;
+    const half = Math.round((w / 2) * Math.sqrt(1 - 4 * k * k));
+    ctx.fillRect(Math.round(x - half), Math.round(y - h / 2 + j), half * 2, 1);
+  }
 }
 
 /** 決まった種から作る乱数（テクスチャ用） */

@@ -1,7 +1,7 @@
 // タスク（行動）。実行すると効果を反映し、所要時間ぶん advance() で時間をまとめて進める。
 import { formatClock, minuteOfDay } from './clock.js';
 import { Spot } from './map.js';
-import { CropId, CROPS, FORGE, MINUTES_PER_HOUR, TASK_MINUTES, TIME } from './params.js';
+import { CropId, CROPS, FORGE, FUELS, GOODS, MINUTES_PER_HOUR, TASK_MINUTES, TIME } from './params.js';
 import { advance, GameEvent, sleepUntilMorning } from './sim.js';
 import { FARM_MANA, GameState, MANA_NAMES } from './state.js';
 
@@ -24,6 +24,23 @@ export interface TaskResult {
 /** 【仮】寝られるのは 18:00 以降か、深夜 */
 const SLEEP_FROM = 18 * MINUTES_PER_HOUR;
 
+/** 燃料（薪・毛・皮）の合計 */
+export function fuelCount(s: GameState): number {
+  return FUELS.reduce((n, f) => n + s.inv.goods[f], 0);
+}
+
+/** 燃料を使う（薪から先に）。使ったものの名前を返す */
+function burnFuel(s: GameState, amount: number): string[] {
+  const used: string[] = [];
+  for (let i = 0; i < amount; i++) {
+    const f = FUELS.find((g) => s.inv.goods[g] > 0);
+    if (!f) break;
+    s.inv.goods[f]--;
+    used.push(GOODS[f].name);
+  }
+  return used;
+}
+
 function canSleep(s: GameState): boolean {
   const m = minuteOfDay(s.clock);
   return m >= SLEEP_FROM || m < TIME.MORNING;
@@ -41,14 +58,16 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
       return [
         {
           id: 'feedForge',
-          label: '白のマナを入れる',
+          label: `白のマナを入れる（燃料${fuelCount(s)}）`,
           minutes: TASK_MINUTES.feedForge,
           disabled:
             s.inv.mana.white <= 0
               ? '白のマナを持っていない'
-              : s.forge.queue.length + s.forge.ready >= FORGE.CAPACITY
-                ? '炉がいっぱい'
-                : null,
+              : fuelCount(s) < FORGE.FUEL_PER_MANA
+                ? '燃料（薪・毛・皮）がない'
+                : s.forge.queue.length + s.forge.ready >= FORGE.CAPACITY
+                  ? '炉がいっぱい'
+                  : null,
         },
         {
           id: 'takeFire',
@@ -115,9 +134,10 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     messages.push('今日のことを日記に書いた。（セーブしました）');
   } else if (id === 'feedForge') {
     s.inv.mana.white--;
+    const used = burnFuel(s, FORGE.FUEL_PER_MANA);
     s.forge.queue.push(FORGE.CONVERT_MINUTES);
     pass(TASK_MINUTES.feedForge);
-    messages.push(`白のマナを炉に入れた。${FORGE.CONVERT_MINUTES / MINUTES_PER_HOUR}時間ほどで火のマナに変わりそうだ。`);
+    messages.push(`${used.join('と')}をくべて、白のマナを炉に入れた。${FORGE.CONVERT_MINUTES / MINUTES_PER_HOUR}時間ほどで火のマナに変わりそうだ。`);
   } else if (id === 'takeFire') {
     s.inv.mana.fire += s.forge.ready;
     messages.push(`火のマナを${s.forge.ready}つ取り出した。`);
@@ -125,7 +145,7 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     pass(TASK_MINUTES.takeFire);
   } else if (id === 'lookForge') {
     const q = s.forge.queue;
-    if (q.length === 0 && s.forge.ready === 0) messages.push('炉は静かだ。白のマナを入れると、火のマナに変わるらしい。');
+    if (q.length === 0 && s.forge.ready === 0) messages.push('炉は静かだ。燃料をくべて白のマナを入れると、火のマナに変わるらしい。');
     else {
       const soonest = q.length ? Math.ceil(Math.min(...q) / MINUTES_PER_HOUR) : 0;
       const parts = [];
@@ -157,7 +177,7 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
   } else if (id === 'lookPlot') {
     messages.push(plotStatus(s, spot));
   } else if (id === 'readSign') {
-    messages.push('「この先、森」……まだ行けないようだ。（プロトタイプは村エリアのみ）');
+    messages.push('「この先、荒野」……まだ行けないようだ。（プロトタイプは村エリアのみ）');
   }
   return { messages, events, minutes: s.clock - before };
 }

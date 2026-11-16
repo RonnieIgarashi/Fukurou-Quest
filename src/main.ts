@@ -1,17 +1,17 @@
 // 起動と画面の切り替え（タイトル → セーブ枠 → 名前入力 → ムービー → フィールド）。
 import { dayOf, formatClock, hourFloat, START_TIME } from './core/clock.js';
-import { DOOR, isBlocked, MAP_H, MAP_W, Spot, spotAt, TILE } from './core/map.js';
+import { BEDS, isBlockedAt, Spot, spotAt, WORLD_W } from './core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from './core/names.js';
-import { CROPS, CropId, NAME_MAX, TIME } from './core/params.js';
+import { CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
 import { newSaveFile } from './core/save/schema.js';
 import { SaveStore, SaveSummary } from './core/save/store.js';
 import { advance, checkBedtime, GameEvent, mokuAsleep, momoAsleep } from './core/sim.js';
-import { createGame, Dir, GameState, MANA_IDS, MANA_NAMES, ManaId, tileCenter } from './core/state.js';
+import { createGame, Dir, GameState, MANA_IDS, MANA_NAMES, ManaId } from './core/state.js';
 import { fillName, Line, Speaker, STORY, STORY_MOVIE, StoryId } from './core/story.js';
 import { optionsFor, runTask, TaskOption } from './core/tasks.js';
 import { clearInput, endFrame, initInput, isHeld, wasPressed } from './input.js';
-import { BASE_H, BASE_W, Ctx, spriteImage } from './view/gfx.js';
+import { BASE_H, BASE_W, Ctx, spriteImage, VIEW_W } from './view/gfx.js';
 import { movieExists, playMovie, portrait, preloadPortraits } from './view/media.js';
 import { drawCursor, drawFrame, Screen } from './view/screen.js';
 import { MOKU, MOMO, PLAYER, SpriteDef } from './view/sprites.js';
@@ -60,9 +60,9 @@ function updateTitle(): void {
 function drawTitle(ctx: Ctx): void {
   // 背景は村。1分で1日がめぐる
   titleBg.clock = START_TIME - 60 + Math.floor((t * 24) % 1440);
-  titleBg.player.x = DOOR.tx * TILE + 8;
-  titleBg.player.y = (DOOR.ty + 5) * TILE;
-  drawWorld(ctx, titleBg, { moving: false, walked: 0 }, t);
+  titleBg.player.x = 905;
+  titleBg.player.y = 930;
+  drawWorld(screen.world, titleBg, { moving: false, walked: 0 }, t);
   ctx.fillStyle = 'rgba(10, 8, 30, 0.35)';
   ctx.fillRect(0, 0, BASE_W, BASE_H);
   screen.text(BASE_W / 2, 44, 'フクロウクエスト', { size: 30, align: 'center', color: '#fff6d8', shadow: '#3a2a60' });
@@ -137,7 +137,7 @@ function drawSlots(ctx: Ctx): void {
 
 function drawTitleBackdrop(ctx: Ctx): void {
   titleBg.clock = START_TIME + 600;
-  drawWorld(ctx, titleBg, { moving: false, walked: 0 }, t);
+  drawWorld(screen.world, titleBg, { moving: false, walked: 0 }, t);
   ctx.fillStyle = 'rgba(10, 8, 30, 0.6)';
   ctx.fillRect(0, 0, BASE_W, BASE_H);
 }
@@ -337,18 +337,18 @@ async function continueGame(slot: string): Promise<void> {
 
 // ---------------------------------------------------------------- フィールド：移動と調べる
 
-const SPEED = 70; // px/秒【仮】
+const SPEED = 110; // px/秒【仮】（村の絵の px）
 const DIRS: Record<Dir, [number, number]> = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] };
 
 function blockedAt(x: number, y: number): boolean {
-  // 足元の小さな四角（幅10・高さ5）で当たりを取る
+  // 足元の小さな四角（幅14・高さ6）で当たりを取る
   const pts = [
-    [x - 5, y - 5],
-    [x + 4, y - 5],
-    [x - 5, y - 1],
-    [x + 4, y - 1],
+    [x - 7, y - 6],
+    [x + 7, y - 6],
+    [x - 7, y],
+    [x + 7, y],
   ];
-  return pts.some(([px, py]) => px < 0 || py < 0 || py >= MAP_H * TILE || isBlocked(Math.floor(px / TILE), Math.floor(py / TILE)));
+  return pts.some(([px, py]) => isBlockedAt(px, py));
 }
 
 function movePlayer(dt: number): void {
@@ -368,7 +368,7 @@ function movePlayer(dt: number): void {
   const before = { x: p.x, y: p.y };
   if (!blockedAt(p.x + vx, p.y)) p.x += vx;
   if (!blockedAt(p.x, p.y + vy)) p.y += vy;
-  p.x = Math.max(6, Math.min(MAP_W * TILE - 6, p.x));
+  p.x = Math.max(8, Math.min(WORLD_W - 8, p.x));
   anim.walked += Math.hypot(p.x - before.x, p.y - before.y);
   const last = trail[trail.length - 1];
   if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 2) {
@@ -385,7 +385,7 @@ function moveCompanions(dt: number): void {
     const dx = target.x - c.x;
     const dy = target.y - c.y;
     const d = Math.hypot(dx, dy);
-    const near = asleep ? 1 : 10;
+    const near = asleep ? 1 : 16;
     if (d > near) {
       const sp = Math.min(d, (asleep ? 60 : SPEED * 1.15) * dt * (d > 80 ? 2 : 1));
       c.x += (dx / d) * sp;
@@ -393,21 +393,16 @@ function moveCompanions(dt: number): void {
       if (Math.abs(dx) > 1) c.dir = dx < 0 ? 'left' : 'right';
     }
   };
-  follow(game.companions.moku, 10, mokuAsleep(game.clock), tileCenter(DOOR.tx - 2, DOOR.ty + 1));
-  follow(game.companions.momo, 20, momoAsleep(game.clock), tileCenter(DOOR.tx + 3, DOOR.ty + 1));
+  follow(game.companions.moku, 12, mokuAsleep(game.clock), BEDS.moku);
+  follow(game.companions.momo, 24, momoAsleep(game.clock), BEDS.momo);
 }
 
-/** 足元のマス */
-function feetTile(): { tx: number; ty: number } {
-  const p = game.player;
-  return { tx: Math.floor(p.x / TILE), ty: Math.floor((p.y - 4) / TILE) };
-}
-
-/** 向いている方向の隣のマス、なければ足元のマスで調べられるもの */
+/** 向いている先（足元から少し前）、なければ足元で調べられるもの */
 function frontSpot(): Spot | null {
-  const f = feetTile();
-  const [dx, dy] = DIRS[game.player.dir];
-  return spotAt(f.tx + dx, f.ty + dy) ?? spotAt(f.tx, f.ty);
+  const p = game.player;
+  const [dx, dy] = DIRS[p.dir];
+  const fy = p.y - 3;
+  return spotAt(p.x + dx * 16, fy + dy * 16) ?? spotAt(p.x, fy);
 }
 
 const TALK: Record<'moku' | 'momo', { awake: string[]; asleep: string[] }> = {
@@ -674,9 +669,11 @@ function drawDialog(ctx: Ctx, line: Line): void {
     const img = portrait(line.speaker);
     if (img) screen.image(img, 11, 99, 50, 50);
     else {
+      // 顔画像が無いときは、ドット絵の上半分（顔）を大きく出す
       const def = FALLBACK_FACE[line.speaker as Exclude<Speaker, 'narration'>];
-      const sc = def.h > 16 ? 2 : 3;
-      ctx.drawImage(spriteImage(def), 36 - (def.w * sc) / 2, 124 - (def.h * sc) / 2 + (def.h > 16 ? 6 : 0), def.w * sc, def.h * sc);
+      const sh = def.h > 32 ? 26 : def.h;
+      const sc = 48 / Math.max(def.w, sh);
+      ctx.drawImage(spriteImage(def), 0, 0, def.w, sh, 36 - (def.w * sc) / 2, 124 - (sh * sc) / 2, def.w * sc, sh * sc);
     }
   }
   drawFrame(ctx, 8, 152, 368, 58, 0.92);
@@ -730,13 +727,14 @@ function drawMenu(ctx: Ctx): void {
     screen.text(BASE_W - 80, 53 + i * 16, label, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
   });
   if (menu.kind === 'items') {
-    drawFrame(ctx, 40, 46, 230, 120);
+    drawFrame(ctx, 40, 46, 230, 134);
     screen.text(52, 52, 'もちもの', { size: 11, color: '#ffe066' });
     const crops = Object.keys(CROPS) as CropId[];
     const rows = [
       ...crops.map((c) => `${CROPS[c].name}の種　${game.inv.seeds[c]}`),
       ...crops.map((c) => `${CROPS[c].name}　${game.inv.crops[c]}`),
       `マナ　${MANA_IDS.map((m) => `${MANA_NAMES[m]}${game.inv.mana[m]}`).join('　')}`,
+      `素材　${(Object.keys(GOODS) as GoodsId[]).map((g) => `${GOODS[g].name}${game.inv.goods[g]}`).join('　')}`,
       `炉　変化中${game.forge.queue.length}・取り出せる火${game.forge.ready}`,
     ];
     rows.forEach((r, i) => screen.text(52, 68 + i * 14, r, { size: 10 }));
@@ -748,7 +746,7 @@ function drawMenu(ctx: Ctx): void {
     if (game.companions.momo.met) list.push(['ももっちゅりん', MOMO.idle, momoAsleep(game.clock), '夜でも働けるが、朝に弱い。']);
     list.forEach(([name, def, asleep, note], i) => {
       const y = 70 + i * 28;
-      ctx.drawImage(spriteImage(def), 52, y);
+      ctx.drawImage(spriteImage(def), 50, y - 2, 20, 20);
       screen.text(74, y, `${name}　${asleep ? '（ねている）' : '（おきている）'}`, { size: 10 });
       screen.text(74, y + 13, note, { size: 9, color: '#b8b0e0' });
     });
@@ -772,16 +770,18 @@ function drawField(ctx: Ctx): void {
     return;
   }
   const clock = displayClock();
-  drawWorld(ctx, game, anim, t, clock);
+  drawWorld(screen.world, game, anim, t, clock);
   drawHud(ctx, clock);
 
   // 調べられる物の前では、主人公の頭上に案内を出す
   if (!menu && !busy && !beats.length && (frontSpot() || talkTarget())) {
+    // フィールド（640x360）の座標を UI（384x216）の座標に直す
     const cam = cameraFor(game);
-    const cx = Math.round(game.player.x - cam.x);
-    const cy = Math.round(game.player.y - cam.y);
-    drawFrame(ctx, cx - 10, cy - 38, 20, 12, 0.85);
-    screen.text(cx, cy - 37, 'Z', { size: 9, align: 'center', color: '#ffe066' });
+    const k = BASE_W / VIEW_W;
+    const cx = Math.round((game.player.x - cam.x) * k);
+    const cy = Math.round((game.player.y - cam.y - 52) * k);
+    drawFrame(ctx, cx - 10, cy - 12, 20, 12, 0.85);
+    screen.text(cx, cy - 11, 'Z', { size: 9, align: 'center', color: '#ffe066' });
   }
 
   if (busy) {

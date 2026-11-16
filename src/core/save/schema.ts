@@ -3,7 +3,8 @@ import { dayOf } from '../clock.js';
 import { createGame, GameState } from '../state.js';
 import { SaveFile, SaveSummary } from './store.js';
 
-export const SAVE_SCHEMA = 1;
+/** 1→2：村が一枚絵になり、座標が変わった（畑の番号と中身はそのまま） */
+export const SAVE_SCHEMA = 2;
 
 export function newSaveFile(slotId: string, game: GameState, now: Date, ownerId: string | null = null): SaveFile {
   const iso = now.toISOString();
@@ -38,17 +39,22 @@ export function migrate(raw: unknown): SaveFile | null {
   const game: GameState = {
     ...base,
     ...g,
-    player: { ...base.player, ...(g.player ?? {}) },
+    // 版1は座標の体系が違うので、位置は小屋の前に戻す
+    player: schema < 2 ? base.player : { ...base.player, ...(g.player ?? {}) },
     inv: {
       seeds: { ...base.inv.seeds, ...(g.inv?.seeds ?? {}) },
       crops: { ...base.inv.crops, ...(g.inv?.crops ?? {}) },
       mana: { ...base.inv.mana, ...(g.inv?.mana ?? {}) },
+      goods: { ...base.inv.goods, ...(g.inv?.goods ?? {}) },
     },
-    plots: Array.isArray(g.plots) && g.plots.length === base.plots.length ? g.plots : base.plots,
+    plots:
+      Array.isArray(g.plots) && g.plots.length === base.plots.length
+        ? g.plots.map((p) => ({ stage: p.stage, crop: p.crop, growth: p.growth, stalled: p.stalled }))
+        : base.plots,
     forge: { ...base.forge, ...(g.forge ?? {}) },
     companions: {
-      moku: { ...base.companions.moku, ...(g.companions?.moku ?? {}) },
-      momo: { ...base.companions.momo, ...(g.companions?.momo ?? {}) },
+      moku: { ...base.companions.moku, ...(g.companions?.moku ?? {}), ...(schema < 2 ? { x: base.companions.moku.x, y: base.companions.moku.y } : {}) },
+      momo: { ...base.companions.momo, ...(g.companions?.momo ?? {}), ...(schema < 2 ? { x: base.companions.momo.x, y: base.companions.momo.y } : {}) },
     },
     flags: { ...(g.flags ?? {}) },
   };

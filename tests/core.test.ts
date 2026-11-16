@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayOf, formatClock, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
-import { DOOR, isBlocked, plotTiles, spotAt } from '../src/core/map.js';
+import { HOME, isBlockedAt, PLOTS, Spot, spotAt } from '../src/core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from '../src/core/names.js';
 import { CROPS, FORGE, MINUTES_PER_DAY, TIME } from '../src/core/params.js';
 import { LocalSaveStore, MemoryKeyValue } from '../src/core/save/localStore.js';
@@ -11,6 +11,9 @@ import { createGame } from '../src/core/state.js';
 import { optionsFor, runTask } from '../src/core/tasks.js';
 
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
+const plotSpot = (i: number): Spot => spotAt((PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
+const FORGE_XY: [number, number] = [1578, 1130];
+const DOOR_XY: [number, number] = [1015, 640];
 
 // ---------------------------------------------------------------- 時計
 
@@ -40,9 +43,9 @@ test('一度に進めても、1分ずつ進めても同じ状態になる', () =
   const b = createGame('テスト');
   for (const g of [a, b]) {
     g.inv.mana.fire = 5;
-    runTask(g, spotAt(plotTiles()[0].tx, plotTiles()[0].ty)!, 'till');
-    runTask(g, spotAt(plotTiles()[0].tx, plotTiles()[0].ty)!, 'plant:bean');
-    runTask(g, spotAt(22, 7)!, 'feedForge');
+    runTask(g, plotSpot(0), 'till');
+    runTask(g, plotSpot(0), 'plant:bean');
+    runTask(g, spotAt(...FORGE_XY)!, 'feedForge');
   }
   advance(a, 3 * MINUTES_PER_DAY);
   for (let i = 0; i < 3 * MINUTES_PER_DAY; i++) advance(b, 1);
@@ -54,7 +57,7 @@ test('一度に進めても、1分ずつ進めても同じ状態になる', () =
 test('豆は4属性のマナを毎朝1つずつ使って育ち、収穫できる', () => {
   const g = createGame('テスト');
   g.inv.mana.fire = 10;
-  const spot = spotAt(plotTiles()[0].tx, plotTiles()[0].ty)!;
+  const spot = plotSpot(0);
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
   const earth = g.inv.mana.earth;
@@ -70,7 +73,7 @@ test('豆は4属性のマナを毎朝1つずつ使って育ち、収穫できる
 test('火のマナが無いと生育が止まる（4属性のどれかが欠けると止まる）', () => {
   const g = createGame('テスト');
   assert.equal(g.inv.mana.fire, 0);
-  const spot = spotAt(plotTiles()[1].tx, plotTiles()[1].ty)!;
+  const spot = plotSpot(1);
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
   const events = sleepUntilMorning(g);
@@ -84,7 +87,7 @@ test('火のマナが無いと生育が止まる（4属性のどれかが欠け�
 
 test('炉：白のマナが一定時間で火のマナに変わり、取り出せる', () => {
   const g = createGame('テスト');
-  const forge = spotAt(21, 6)!;
+  const forge = spotAt(...FORGE_XY)!;
   assert.equal(forge.kind, 'forge');
   runTask(g, forge, 'feedForge');
   assert.equal(g.forge.queue.length, 1);
@@ -97,10 +100,25 @@ test('炉：白のマナが一定時間で火のマナに変わり、取り出�
 
 test('炉は容量を超えて入れられない', () => {
   const g = createGame('テスト');
-  const forge = spotAt(21, 6)!;
+  g.inv.goods.wood = 10;
+  const forge = spotAt(...FORGE_XY)!;
   for (let i = 0; i < FORGE.CAPACITY; i++) runTask(g, forge, 'feedForge');
   const opt = optionsFor(g, forge).find((o) => o.id === 'feedForge')!;
   assert.equal(opt.disabled, '炉がいっぱい');
+});
+
+test('炉には燃料が要り、薪→毛→皮の順に使う', () => {
+  const g = createGame('テスト');
+  const forge = spotAt(...FORGE_XY)!;
+  g.inv.goods.wood = 1;
+  g.inv.goods.hair = 1;
+  runTask(g, forge, 'feedForge');
+  assert.equal(g.inv.goods.wood, 0);
+  runTask(g, forge, 'feedForge');
+  assert.equal(g.inv.goods.hair, 0);
+  const opt = optionsFor(g, forge).find((o) => o.id === 'feedForge')!;
+  assert.equal(opt.disabled, '燃料（薪・毛・皮）がない');
+  assert.equal(g.forge.queue.length, 2);
 });
 
 // ---------------------------------------------------------------- 仲間・イベント
@@ -134,7 +152,7 @@ test('深夜2時を過ぎると眠ってしまい、6:00 に小屋の前で目�
 
 test('寝られるのは 18:00 以降', () => {
   const g = createGame('テスト');
-  const door = spotAt(DOOR.tx, DOOR.ty)!;
+  const door = spotAt(...DOOR_XY)!;
   assert.ok(optionsFor(g, door).find((o) => o.id === 'sleep')!.disabled);
   advance(g, at(1, 18) - g.clock);
   assert.equal(optionsFor(g, door).find((o) => o.id === 'sleep')!.disabled, null);
@@ -149,10 +167,24 @@ test('100日目の朝にドラゴン来訪のイベント', () => {
 
 // ---------------------------------------------------------------- 地形
 
-test('扉は調べられ、川と木は通れない', () => {
-  assert.equal(spotAt(DOOR.tx, DOOR.ty)?.kind, 'door');
-  assert.equal(isBlocked(DOOR.tx, DOOR.ty + 1), false);
-  assert.equal(isBlocked(5, 0), true);
+test('扉・炉・立て札・畑の6区画を調べられる', () => {
+  assert.equal(spotAt(...DOOR_XY)?.kind, 'door');
+  assert.equal(spotAt(...FORGE_XY)?.kind, 'forge');
+  assert.equal(spotAt(1680, 790)?.kind, 'sign');
+  for (let i = 0; i < PLOTS.length; i++) assert.equal(plotSpot(i).plot, i);
+});
+
+test('小屋の前・畑の中・浜辺は歩け、川・噴水・森・畑の柵は通れない', () => {
+  assert.equal(isBlockedAt(HOME.x, HOME.y), false);
+  assert.equal(isBlockedAt(1240, 700), false); // 畑の中
+  assert.equal(isBlockedAt(1160, 790), false); // 畑の入口
+  assert.equal(isBlockedAt(1000, 1380), false); // 浜辺
+  assert.equal(isBlockedAt(250, 1050), false); // 橋
+  assert.equal(isBlockedAt(320, 900), true); // 川
+  assert.equal(isBlockedAt(905, 838), true); // 噴水
+  assert.equal(isBlockedAt(1000, 400), true); // 森
+  assert.equal(isBlockedAt(1250, 790), true); // 畑の前の柵
+  assert.equal(isBlockedAt(700, 1230), true); // 石垣
 });
 
 // ---------------------------------------------------------------- 名前
@@ -194,7 +226,15 @@ test('セーブして読み込むと同じ状態に戻る', async () => {
 test('古い・欠けたデータは初期値で補い、新しい版や壊れたデータは読まない', () => {
   const m = migrate({ schema: SAVE_SCHEMA, slotId: 'slot1', game: { playerName: 'ロニー', clock: 999 } });
   assert.equal(m?.game.clock, 999);
-  assert.equal(m?.game.plots.length, plotTiles().length);
+  assert.equal(m?.game.plots.length, PLOTS.length);
+  // 版1のデータは、位置を小屋の前に戻し、畑の中身は残す
+  const old = createGame('ロニー');
+  old.player.x = 5;
+  old.plots[2].stage = 'tilled';
+  const m1 = migrate({ schema: 1, slotId: 'slot1', game: old });
+  assert.equal(m1?.game.player.x, HOME.x);
+  assert.equal(m1?.game.plots[2].stage, 'tilled');
+  assert.equal(m1?.game.inv.goods.wood, createGame('ア').inv.goods.wood);
   assert.equal(migrate({ schema: SAVE_SCHEMA + 1, game: { playerName: 'ア', clock: 1 } }), null);
   assert.equal(migrate('broken'), null);
   assert.equal(migrate({ game: { clock: 1 } }), null);
