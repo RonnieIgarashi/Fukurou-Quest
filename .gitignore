@@ -1,0 +1,5 @@
+node_modules/
+public/js/
+.test-build/
+__pycache__/
+*.pyc

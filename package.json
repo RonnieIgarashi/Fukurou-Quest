@@ -1,0 +1,17 @@
+{
+  "name": "fukurou-quest",
+  "version": "0.1.0",
+  "description": "フクロウクエスト — ドット絵の箱庭生活シミュレーション（プロトタイプ）",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc -p tsconfig.json --watch",
+    "test": "tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\"",
+    "serve": "python -m http.server 8766 --directory public"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.3"
+  }
+}
