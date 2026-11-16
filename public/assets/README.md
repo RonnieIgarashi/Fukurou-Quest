@@ -6,7 +6,7 @@
 
 | ファイル名 | エリア |
 |---|---|
-| `village.jpg` | 村（2000×1493。絵の1px＝ゲームの1px）。`tools/prepare_village.py` が `docs/concept/village.jpg` から作る（サボテンとウシを消す） |
+| `village.jpg` | 村（2000×1493。絵の1px＝ゲームの1px）。`tools/prepare_village.py` が修正版の絵 `docs/concept/village_v2.jpg` から作る（ウシと煙突の煙を消し、慰霊碑・立て札・ベンチ・水樽を少し小さくする） |
 
 絵を差し替えるときは、歩ける範囲などを `src/core/map.ts` で測り直します。室内の絵（800×450）ができたら、`map.ts` の各室内の `image` にパスを書きます。
 
@@ -14,7 +14,10 @@
 
 | ファイル名 | 中身 |
 |---|---|
-| `cow1.png`・`cow2.png` | 牧場のウシ（村の絵から切り抜いたもの） |
+| `cow-white-a.png`・`cow-white-b.png` | 牧場の白ウシ（村の絵から切り抜いたもの） |
+| `cow-black.png` | 荒野の黒ウシ（同上。ゲームでは 0.62 倍で表示） |
+
+煙・水しぶき・もや・火の粉は絵を使わず、`src/view/particles.ts` が粒（パーティクル）で描きます。
 
 ## 顔画像 `portraits/`
 

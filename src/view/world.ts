@@ -1,12 +1,13 @@
 // フィールドの描画：背景の絵 → 水の動き・畑 → 物と人物（足元の y で前後を決める。絵の建物や木は切り抜きを手前に重ねる）
 // → 時刻の光 → 周辺減光。座標はエリアの絵の px（ワールド単位）。画面には 800x450 の範囲を映す。
 import { hourFloat } from '../core/clock.js';
-import { AreaId, AREAS, inPoly, PEN, PLOTS, Poly, WINDOWS } from '../core/map.js';
+import { AreaId, AREAS, inPoly, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
 import { CROPS, CropId } from '../core/params.js';
 import { mokuAsleep, momoAsleep } from '../core/sim.js';
 import { Companion, GameState, Plot } from '../core/state.js';
 import { Ctx, drawAtFeet, drawShadow, makeCanvas, rng, spriteImage, VIEW_H, VIEW_W } from './gfx.js';
 import { interiorImage, SMITHY_FIRE } from './interior.js';
+import { Emitter, Particles, rand, smoke } from './particles.js';
 import { MOKU, MOMO, PLAYER, ZZZ } from './sprites.js';
 
 export interface Camera {
@@ -30,9 +31,59 @@ interface Cutout {
   x1: number;
   y1: number;
   baseY: number;
+  sway?: Sway;
 }
 
-const art = new Map<AreaId, { img: HTMLImageElement; ready: boolean; cutouts: Cutout[] }>();
+const art = new Map<AreaId, { img: HTMLImageElement; ready: boolean; cutouts: Cutout[]; sways: Cutout[] }>();
+
+// ---------------------------------------------------------------- 風に揺れる木（絵の木の葉の部分を切り抜いて、上ほど大きく左右にずらす）
+
+interface Sway {
+  /** 葉の部分（楕円） */
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  /** ここより下は揺れない（幹） */
+  pivotY: number;
+  /** てっぺんの揺れ幅（px） */
+  amp: number;
+  phase: number;
+}
+
+const SWAYS: Record<string, Sway> = {
+  plazaTree: { cx: 1311, cy: 966, rx: 62, ry: 50, pivotY: 1012, amp: 1.6, phase: 0 },
+  smithyTree: { cx: 1656, cy: 872, rx: 47, ry: 48, pivotY: 918, amp: 1.3, phase: 1.7 },
+  westTree1: { cx: 828, cy: 488, rx: 38, ry: 54, pivotY: 540, amp: 1.2, phase: 0.6 },
+  westTree2: { cx: 907, cy: 490, rx: 48, ry: 60, pivotY: 552, amp: 1.4, phase: 2.4 },
+  orchard1: { cx: 1142, cy: 528, rx: 42, ry: 54, pivotY: 580, amp: 1.1, phase: 1.1 },
+  orchard2: { cx: 1220, cy: 538, rx: 44, ry: 54, pivotY: 590, amp: 1.1, phase: 2.9 },
+  orchard3: { cx: 1288, cy: 553, rx: 37, ry: 48, pivotY: 600, amp: 1.0, phase: 0.3 },
+  eastTree: { cx: 1336, cy: 500, rx: 38, ry: 50, pivotY: 550, amp: 1.2, phase: 3.6 },
+  gateTree: { cx: 1490, cy: 478, rx: 64, ry: 64, pivotY: 540, amp: 1.5, phase: 4.4 },
+};
+
+/** 高さ y の所の、いまの揺れ（px） */
+function swayAt(s: Sway, y: number, t: number): number {
+  const top = s.cy - s.ry;
+  const k = Math.max(0, Math.min(1, (s.pivotY - y) / (s.pivotY - top)));
+  // ゆっくりした風の強弱に、小刻みなそよぎを重ねる
+  const gust = 0.55 + 0.45 * Math.sin(t * 0.37 + s.phase * 0.7);
+  const wave = Math.sin(t * 1.6 + s.phase) + 0.3 * Math.sin(t * 3.7 + s.phase * 2);
+  return s.amp * gust * wave * Math.pow(k, 1.4);
+}
+
+/** 切り抜きを、横の細い帯に分けて、高さごとにずらして描く */
+function drawSwayed(ctx: Ctx, co: Cutout, s: Sway, t: number): void {
+  const h = co.y1 - co.y0;
+  const w = co.x1 - co.x0;
+  const stripe = 2;
+  for (let sy = 0; sy < h; sy += stripe) {
+    const y = co.y0 + sy;
+    const dx = y >= s.pivotY ? 0 : swayAt(s, y, t);
+    ctx.drawImage(co.img, 0, sy, w, Math.min(stripe + 1, h - sy), co.x0 + dx, y, w, Math.min(stripe + 1, h - sy));
+  }
+}
 
 function bounds(poly: Poly): { x0: number; y0: number; x1: number; y1: number } {
   const xs = poly.map((p) => p[0]);
@@ -40,8 +91,15 @@ function bounds(poly: Poly): { x0: number; y0: number; x1: number; y1: number } 
   return { x0: Math.floor(Math.min(...xs)) - 3, y0: Math.floor(Math.min(...ys)) - 3, x1: Math.ceil(Math.max(...xs)) + 3, y1: Math.ceil(Math.max(...ys)) + 3 };
 }
 
+function ellipsePoly(s: Sway): Poly {
+  return Array.from({ length: 24 }, (_, i): [number, number] => [
+    s.cx + Math.cos((i / 24) * Math.PI * 2) * s.rx,
+    s.cy + Math.sin((i / 24) * Math.PI * 2) * s.ry,
+  ]);
+}
+
 /** 輪郭を少しぼかして切り抜く（人物との境目が目立たないように） */
-function cutout(img: HTMLImageElement, poly: Poly, baseY: number): Cutout {
+function cutout(img: HTMLImageElement, poly: Poly, baseY: number, sway?: Sway): Cutout {
   const b = bounds(poly);
   const w = b.x1 - b.x0;
   const h = b.y1 - b.y0;
@@ -58,7 +116,7 @@ function cutout(img: HTMLImageElement, poly: Poly, baseY: number): Cutout {
   ctx.filter = 'blur(1.5px)';
   ctx.drawImage(mask, 0, 0);
   ctx.filter = 'none';
-  return { img: c, ...b, baseY };
+  return { img: c, ...b, baseY, sway };
 }
 
 function areaArt(area: AreaId) {
@@ -66,10 +124,11 @@ function areaArt(area: AreaId) {
   const src = AREAS[area].image;
   if (!a && src) {
     const img = new Image();
-    const entry = { img, ready: false, cutouts: [] as Cutout[] };
+    const entry = { img, ready: false, cutouts: [] as Cutout[], sways: [] as Cutout[] };
     img.onload = () => {
       entry.ready = true;
-      entry.cutouts = AREAS[area].occluders.map((o) => cutout(img, o.poly, o.baseY));
+      entry.cutouts = AREAS[area].occluders.map((o) => cutout(img, o.poly, o.baseY, o.sway ? SWAYS[o.sway] : undefined));
+      if (area === 'village') entry.sways = Object.values(SWAYS).map((s) => cutout(img, ellipsePoly(s), 0, s));
     };
     img.src = src;
     art.set(area, entry);
@@ -78,7 +137,7 @@ function areaArt(area: AreaId) {
   return a;
 }
 
-const COW_SRC = ['assets/sprites/cow1.png', 'assets/sprites/cow2.png'];
+const COW_SRC = ['assets/sprites/cow-white-a.png', 'assets/sprites/cow-white-b.png', 'assets/sprites/cow-black.png'];
 const cowImgs = COW_SRC.map((src) => {
   const i = new Image();
   i.src = src;
@@ -97,6 +156,11 @@ export function cameraFor(s: GameState): Camera {
 
 interface Cow {
   img: number;
+  /** 絵の倍率（黒ウシは元の絵が大きいので縮める） */
+  scale: number;
+  /** 歩き回る範囲 */
+  area: Poly;
+  speed: number;
   x: number;
   y: number;
   tx: number;
@@ -111,17 +175,40 @@ interface Cow {
 
 const cowRng = rng(4242);
 const cows: Cow[] = [
-  { img: 0, x: 522, y: 870, tx: 522, ty: 870, faceSrc: 1, face: 1, wait: 2, walking: false, phase: 0 },
-  { img: 1, x: 590, y: 812, tx: 590, ty: 812, faceSrc: -1, face: -1, wait: 4, walking: false, phase: 1.3 },
+  // 牧場の白ウシ2頭（重ならないように、離れた所から始める）
+  { img: 0, scale: 1, area: PEN, speed: 13, x: 616, y: 800, tx: 616, ty: 800, faceSrc: -1, face: -1, wait: 3, walking: false, phase: 0 },
+  { img: 1, scale: 1, area: PEN, speed: 13, x: 530, y: 866, tx: 530, ty: 866, faceSrc: 1, face: 1, wait: 6, walking: false, phase: 1.3 },
+  // 荒野の黒ウシ
+  { img: 2, scale: 0.62, area: WASTE, speed: 9, x: 1860, y: 1060, tx: 1860, ty: 1060, faceSrc: -1, face: -1, wait: 4, walking: false, phase: 2.1 },
 ];
 
-function randomInPen(): [number, number] {
-  for (let i = 0; i < 40; i++) {
-    const x = 490 + cowRng() * 190;
-    const y = 772 + cowRng() * 100;
-    if (inPoly(x, y, PEN)) return [x, y];
+function cowWidth(c: Cow): number {
+  const img = cowImgs[c.img];
+  return (img.naturalWidth || 80) * c.scale;
+}
+
+/** 2頭の体が重なるか（横は体の幅、縦は奥行きの分だけ見る） */
+function overlaps(a: Cow, ax: number, ay: number, b: Cow, bx: number, by: number): boolean {
+  return Math.abs(ax - bx) < (cowWidth(a) + cowWidth(b)) * 0.5 + 6 && Math.abs(ay - by) < 36;
+}
+
+function randomTarget(c: Cow): [number, number] {
+  const xs = c.area.map((p) => p[0]);
+  const ys = c.area.map((p) => p[1]);
+  const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  const others = cows.filter((o) => o !== c && o.area === c.area);
+  for (let i = 0; i < 60; i++) {
+    const x = x0 + cowRng() * (x1 - x0);
+    const y = y0 + cowRng() * (y1 - y0);
+    if (!inPoly(x, y, c.area)) continue;
+    // 体の端も範囲の内側に収める
+    const half = cowWidth(c) * 0.4;
+    if (!inPoly(x - half, y, c.area) || !inPoly(x + half, y, c.area)) continue;
+    // ほかの牛の今の場所と行き先には重ならない
+    if (others.some((o) => overlaps(c, x, y, o, o.x, o.y) || overlaps(c, x, y, o, o.tx, o.ty))) continue;
+    return [x, y];
   }
-  return [560, 820];
+  return [c.x, c.y];
 }
 
 export function updateCows(dt: number): void {
@@ -134,21 +221,23 @@ export function updateCows(dt: number): void {
         c.walking = false;
         c.wait = 2 + cowRng() * 6;
       } else {
-        const sp = 13 * dt;
-        c.x += (dx / d) * sp;
-        c.y += (dy / d) * sp;
+        const sp = Math.min(d, c.speed * dt);
+        const nx = c.x + (dx / d) * sp;
+        const ny = c.y + (dy / d) * sp;
         if (Math.abs(dx) > 2) c.face = dx > 0 ? 1 : -1;
-        // もう1頭とぶつかりそうなら、いったん止まる
-        const other = cows.find((o) => o !== c)!;
-        if (Math.hypot(other.x - c.x, other.y - c.y) < 34) {
+        // ほかの牛にぶつかるなら、そこで止まって行き先を選び直す
+        if (cows.some((o) => o !== c && o.area === c.area && overlaps(c, nx, ny, o, o.x, o.y))) {
           c.walking = false;
-          c.wait = 1 + cowRng() * 2;
+          c.wait = 0.8 + cowRng() * 2;
+        } else {
+          c.x = nx;
+          c.y = ny;
         }
       }
     } else {
       c.wait -= dt;
       if (c.wait <= 0) {
-        [c.tx, c.ty] = randomInPen();
+        [c.tx, c.ty] = randomTarget(c);
         c.walking = true;
       }
     }
@@ -162,16 +251,18 @@ function cowDrawable(c: Cow, t: number): Drawable {
     draw: (ctx) => {
       const img = cowImgs[c.img];
       if (!img.complete || !img.naturalWidth) return;
-      const w = img.naturalWidth;
-      const h = img.naturalHeight;
-      const bob = c.walking ? Math.abs(Math.sin(t * 7 + c.phase)) * 1.2 : Math.sin(t * 1.5 + c.phase) * 0.4;
+      const w = img.naturalWidth * c.scale;
+      const h = img.naturalHeight * c.scale;
+      const bob = c.walking ? Math.abs(Math.sin(t * 7 + c.phase)) * 1.2 : 0;
       const tilt = c.walking ? Math.sin(t * 7 + c.phase) * 0.025 : 0;
+      // 立ち止まっているときは、息づかい（体がわずかにふくらむ）
+      const breath = c.walking ? 0 : Math.sin(t * 1.4 + c.phase) * 0.012;
       drawShadow(ctx, c.x, c.y - 2, w * 0.8);
       ctx.save();
       ctx.translate(c.x, c.y - bob);
       ctx.rotate(tilt);
-      ctx.scale(c.face * c.faceSrc, 1);
-      ctx.drawImage(img, -w / 2, -h + 4);
+      ctx.scale(c.face * c.faceSrc, 1 + breath);
+      ctx.drawImage(img, -w / 2, -h + 4 * c.scale, w, h);
       ctx.restore();
     },
   };
@@ -489,52 +580,177 @@ function drawShore(ctx: Ctx, t: number, cam: Camera): void {
   }
 }
 
+// ---------------------------------------------------------------- 粒（水しぶき・もや・泡・煙・火の粉）
+
+/** 川・滝・波打ち際の粒（地面の高さ。人物より奥に描く） */
+const groundFx = new Particles(500);
+/** 噴水の粒（噴水と同じ前後関係で描く） */
+const fountainFx = new Particles(320);
+/** 煙（人物より手前、空の高さ） */
+const skyFx = new Particles(240);
+/** 室内（炉の火の粉と煙） */
+const roomFx = new Particles(240);
+
+const EMIT = {
+  chimney: new Emitter(2.2),
+  smithySmoke: new Emitter(1.6),
+  fountain: new Emitter(75),
+  fountainMist: new Emitter(2.5),
+  fallsSpray: new Emitter(30),
+  fallsMist: new Emitter(7),
+  poolMist: new Emitter(3),
+  riverFoam: new Emitter(9),
+  shoreFoam: new Emitter(16),
+  sparks: new Emitter(9),
+  roomSmoke: new Emitter(2),
+};
+
+/** 噴水：吹き出し口・上の受け皿・下の受け皿（絵から測った値） */
+const FOUNTAIN = { spoutX: 900, spoutY: 752, bowlY: 778, bowlHalf: 16, poolX: 900, poolY: 818 };
+
+let lastT = -1;
+let lastArea: AreaId | null = null;
+
+/** 波打ち際の寄せ具合（drawShore と同じ式） */
+const shoreWave = (t: number, k: number) => 0.5 + 0.5 * Math.sin(t * 0.9 - k * 0.004);
+
+function splash(ps: Particles, x: number, y: number, n: number, power: number): void {
+  for (let i = 0; i < n; i++) {
+    ps.add({ kind: 'drop', x, y: y - 1, vx: rand(-1, 1) * 18 * power, vy: -rand(14, 32) * power, ay: 160, life: 0.5, size: 0.9, alpha: 0.75, floorY: y + 1 });
+  }
+}
+
+function emitVillage(dt: number, t: number, forgeBusy: boolean): void {
+  // 小屋の煙突の煙（いつも少し出ている。風で右へ流れる）
+  for (let i = EMIT.chimney.count(dt); i > 0; i--) smoke(skyFx, 1018, 511);
+  // 鍛冶小屋：炉が動いているときは屋根から煙
+  if (forgeBusy) for (let i = EMIT.smithySmoke.count(dt); i > 0; i--) smoke(skyFx, 1556, 892, 0.8);
+
+  // 噴水：吹き出し口から左右へ弧を描いて落ちる。上の受け皿に落ちるもの、下の受け皿まで落ちるもの
+  const f = FOUNTAIN;
+  for (let i = EMIT.fountain.count(dt); i > 0; i--) {
+    const side = rand() < 0.5 ? -1 : 1;
+    const inner = rand() < 0.25;
+    const vx = side * (inner ? rand(4, 12) : rand(20, 34));
+    fountainFx.add({
+      kind: 'drop',
+      x: f.spoutX + rand(-1.5, 1.5),
+      y: f.spoutY,
+      vx,
+      vy: -rand(38, 50),
+      ay: 170,
+      life: 3,
+      size: rand(0.9, 1.5),
+      alpha: rand(0.6, 0.9),
+      floorY: inner ? f.bowlY : f.poolY + rand(-3, 5),
+      onLand: (p) => {
+        if (rand() < 0.35) splash(fountainFx, p.x, p.y, 2, inner ? 0.6 : 1);
+        if (!inner && rand() < 0.3) fountainFx.add({ kind: 'foam', x: p.x, y: p.y, vx: rand(-4, 4), life: rand(0.6, 1.2), size: rand(0.8, 1.6), alpha: 0.7 });
+      },
+    });
+  }
+  for (let i = EMIT.fountainMist.count(dt); i > 0; i--) {
+    fountainFx.add({ kind: 'mist', x: f.poolX + rand(-30, 30), y: f.poolY - 2, vx: rand(-3, 3), vy: -rand(3, 7), life: rand(1.5, 2.5), size: rand(5, 8), grow: 4, alpha: 0.22 });
+  }
+
+  // 滝：落ち口から飛ぶしぶきと、滝つぼから上がるもや・泡
+  for (let i = EMIT.fallsSpray.count(dt); i > 0; i--) {
+    const x = rand(110, 245);
+    groundFx.add({ kind: 'drop', x, y: rand(1280, 1300), vx: rand(-25, 25), vy: -rand(20, 55), ay: 150, life: 1.2, size: rand(0.9, 1.6), alpha: 0.8, floorY: 1300 + rand(0, 12) });
+  }
+  for (let i = EMIT.fallsMist.count(dt); i > 0; i--) {
+    groundFx.add({ kind: 'mist', x: rand(100, 245), y: rand(1282, 1306), vx: rand(-4, 6), vy: -rand(6, 12), drag: 0.3, life: rand(2.2, 3.4), size: rand(7, 11), grow: 6, alpha: 0.3 });
+    if (rand() < 0.6) groundFx.add({ kind: 'foam', x: rand(100, 240), y: rand(1296, 1318), vx: rand(-3, 3), vy: rand(2, 8), life: rand(1, 2), size: rand(1, 2.4), alpha: 0.8 });
+  }
+  for (let i = EMIT.poolMist.count(dt); i > 0; i--) {
+    groundFx.add({ kind: 'mist', x: rand(60, 150), y: rand(1400, 1440), vx: rand(-2, 4), vy: -rand(4, 8), life: rand(2, 3), size: rand(6, 9), grow: 5, alpha: 0.2 });
+  }
+
+  // 川：流れに乗って下る小さな泡
+  const total = RIVER_ACC[RIVER_ACC.length - 1];
+  for (let i = EMIT.riverFoam.count(dt); i > 0; i--) {
+    const d = rand(0, total * 0.85);
+    const p = pointOn(RIVER, RIVER_ACC, d);
+    const q = pointOn(RIVER, RIVER_ACC, d + 4);
+    const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    const off = rand(-11, 11);
+    const sp = rand(30, 46);
+    groundFx.add({ kind: 'foam', x: p.x + p.nx * off, y: p.y + p.ny * off, vx: ((q.x - p.x) / len) * sp, vy: ((q.y - p.y) / len) * sp, life: rand(1.2, 2.4), size: rand(0.7, 1.5), alpha: 0.75 });
+  }
+
+  // 波打ち際：寄せる波の先の泡
+  const st = SHORE_ACC[SHORE_ACC.length - 1];
+  for (let i = EMIT.shoreFoam.count(dt); i > 0; i--) {
+    const d = rand(0, st);
+    const p = pointOn(SHORE, SHORE_ACC, d);
+    const w = shoreWave(t, d);
+    const rising = Math.cos(t * 0.9 - d * 0.004) > 0;
+    groundFx.add({
+      kind: 'foam',
+      x: p.x + rand(-6, 6),
+      y: p.y - (2 + 12 * w) + rand(-1, 2),
+      vx: rand(-3, 3),
+      vy: rising ? -rand(3, 8) : rand(2, 6),
+      drag: 0.8,
+      life: rand(0.8, 1.6),
+      size: rand(0.8, 1.8),
+      alpha: 0.85,
+    });
+  }
+}
+
+function emitRoom(area: AreaId, dt: number, forgeBusy: boolean): void {
+  if (area !== 'smithy' || !forgeBusy) return;
+  for (let i = EMIT.sparks.count(dt); i > 0; i--) {
+    roomFx.add({ kind: 'spark', x: SMITHY_FIRE.x + rand(-22, 22), y: SMITHY_FIRE.y - rand(0, 8), vx: rand(-14, 14), vy: -rand(25, 60), ay: 12, drag: 0.6, life: rand(0.6, 1.4), size: rand(0.8, 1.6), alpha: 1 });
+  }
+  // 火口から煙突へ吸い込まれる煙
+  for (let i = EMIT.roomSmoke.count(dt); i > 0; i--) {
+    roomFx.add({ kind: 'puff', x: SMITHY_FIRE.x + rand(-10, 10), y: SMITHY_FIRE.y - 20, vx: rand(-2, 2), vy: -rand(18, 26), drag: 0.1, life: rand(2.2, 3), size: rand(5, 7), grow: 5, alpha: 0.45, vrot: rand(-0.4, 0.4) });
+  }
+}
+
+function updateFx(area: AreaId, t: number, forgeBusy: boolean): void {
+  let dt = lastT < 0 ? 0 : t - lastT;
+  // 止まっていた後（タブを離れていた等）に、一度に大量に出さない。重いときは1フレーム最大 0.1 秒ずつ進める
+  if (dt < 0 || dt > 2) dt = 0.016;
+  dt = Math.min(dt, 0.1);
+  lastT = t;
+  if (area !== lastArea) {
+    for (const ps of [groundFx, fountainFx, skyFx, roomFx]) ps.clear();
+    lastArea = area;
+  }
+  if (area === 'village') emitVillage(dt, t, forgeBusy);
+  else emitRoom(area, dt, forgeBusy);
+  for (const ps of [groundFx, fountainFx, skyFx, roomFx]) ps.update(dt);
+}
+
 function drawFountain(ctx: Ctx, t: number): void {
-  const top = { x: 905, y: 750 };
-  // 左右に落ちる水しぶき
-  for (let i = 0; i < 26; i++) {
-    const side = i % 2 === 0 ? -1 : 1;
-    const k = (t * 0.9 + hash(i) ) % 1;
-    const x = top.x + side * (6 + 34 * k);
-    const y = top.y - 6 + 66 * k * k - 12 * k;
-    ctx.fillStyle = `rgba(235, 248, 255, ${0.85 * (1 - k * 0.6)})`;
-    ctx.beginPath();
-    ctx.arc(x, y, 1.3, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // 受け皿の波紋
-  for (let i = 0; i < 3; i++) {
-    const k = (t * 0.5 + i / 3) % 1;
-    ctx.strokeStyle = `rgba(255, 255, 255, ${0.5 * (1 - k)})`;
-    ctx.lineWidth = 1.1;
-    ctx.beginPath();
-    ctx.ellipse(905, 826, 10 + 30 * k, 3 + 8 * k, 0, 0, Math.PI * 2);
-    ctx.stroke();
-  }
+  // 受け皿の波紋（水の落ちる左右から広がる）
+  for (const side of [-1, 1])
+    for (let i = 0; i < 3; i++) {
+      const k = (t * 0.6 + i / 3 + (side > 0 ? 0.5 : 0)) % 1;
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.45 * (1 - k)})`;
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.ellipse(FOUNTAIN.poolX + side * 27, FOUNTAIN.poolY + 1, 3 + 14 * k, 1 + 4 * k, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   // きらめき
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     const a = Math.max(0, Math.sin(t * 3 + i * 2.3));
     ctx.fillStyle = `rgba(255, 255, 255, ${a})`;
-    ctx.fillRect(885 + hash(i + 20) * 40, 815 + hash(i + 30) * 16, 2, 2);
+    ctx.fillRect(868 + hash(i + 20) * 64, 812 + hash(i + 30) * 12, 1.6, 1.6);
   }
+  fountainFx.draw(ctx);
 }
 
 function drawWater(ctx: Ctx, t: number, cam: Camera): void {
   const near = (x0: number, y0: number, x1: number, y1: number) => x1 > cam.x && x0 < cam.x + VIEW_W && y1 > cam.y && y0 < cam.y + VIEW_H;
   if (near(150, 420, 600, 1000)) flowStreaks(ctx, RIVER, RIVER_ACC, t, 46, 38, 26, 14, 0.55, 0);
-  if (near(80, 1080, 320, 1460)) {
-    flowStreaks(ctx, FALLS, FALLS_ACC, t, 60, 110, 90, 22, 0.6, 500);
-    // 滝つぼの泡
-    for (let i = 0; i < 18; i++) {
-      const k = (t * 0.7 + hash(i + 900)) % 1;
-      ctx.fillStyle = `rgba(255, 255, 255, ${0.6 * (1 - k)})`;
-      ctx.beginPath();
-      ctx.arc(130 + hash(i + 901) * 130, 1350 + hash(i + 902) * 60 - k * 10, 1.5 + k * 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-  if (near(840, 730, 970, 870)) drawFountain(ctx, t);
+  if (near(80, 1080, 320, 1460)) flowStreaks(ctx, FALLS, FALLS_ACC, t, 60, 110, 90, 22, 0.6, 500);
   drawShore(ctx, t, cam);
+  groundFx.draw(ctx);
 }
 
 // ---------------------------------------------------------------- 人物
@@ -623,19 +839,29 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
   const area = s.player.area;
   const a = areaArt(area);
   const cam = cameraFor(s);
+  const forgeBusy = s.forge.queue.length > 0 || s.forge.ready > 0;
+  updateFx(area, t, forgeBusy);
+  const inView = (co: Cutout) => co.x1 > cam.x && co.x0 < cam.x + VIEW_W && co.y1 > cam.y && co.y0 < cam.y + VIEW_H;
   ctx.save();
   ctx.translate(-cam.x, -cam.y);
   if (a?.ready) ctx.drawImage(a.img, cam.x, cam.y, VIEW_W, VIEW_H, cam.x, cam.y, VIEW_W, VIEW_H);
   else if (area === 'village') {
     ctx.fillStyle = '#9cbf6a';
     ctx.fillRect(cam.x, cam.y, VIEW_W, VIEW_H);
-  } else ctx.drawImage(interiorImage(area), 0, 0, 800, 450);
+  } else {
+    ctx.drawImage(interiorImage(area), 0, 0, 800, 450);
+    roomFx.draw(ctx);
+  }
 
   const items: Drawable[] = [];
   if (area === 'village') {
+    // 風に揺れる木
+    for (const sw of a?.sways ?? []) if (inView(sw)) drawSwayed(ctx, sw, sw.sway!, t);
     drawWater(ctx, t, cam);
     s.plots.forEach((p, i) => drawPlot(ctx, i, p, items));
     for (const c of cows) items.push(cowDrawable(c, t));
+    // 噴水の水しぶき（噴水の絵の切り抜きのすぐ手前）
+    items.push({ y: 841, x: FOUNTAIN.poolX, draw: (c) => drawFountain(c, t) });
   }
 
   // 仲間（同じエリアにいるときだけ）
@@ -670,7 +896,8 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
       x: (co.x0 + co.x1) / 2,
       draw: (g) => {
         g.globalAlpha = alpha;
-        g.drawImage(co.img, co.x0, co.y0);
+        if (co.sway) drawSwayed(g, co, co.sway, t);
+        else g.drawImage(co.img, co.x0, co.y0);
         g.globalAlpha = 1;
       },
     });
@@ -678,10 +905,10 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
 
   items.sort((a1, b1) => a1.y - b1.y);
   for (const it of items) it.draw(ctx);
+  if (area === 'village') skyFx.draw(ctx);
 
   // ---- 光
   const hour = hourFloat(clock);
-  const forgeBusy = s.forge.queue.length > 0 || s.forge.ready > 0;
   const dark = darkness(hour);
   if (area === 'village') {
     const [r, g, b] = skyColor(hour);

@@ -61,7 +61,11 @@ export const LOOK: Record<string, Line[]> = {
     { speaker: 'narration', text: '（荒野エリアは、マップの絵ができたら行けるようになります）' },
   ],
   bench: [{ speaker: 'player', text: 'ベンチだ。噴水をながめながら、ひと休みできそうだ。' }],
-  cows: [{ speaker: 'player', text: 'ウシがのんびり草を食べている。' }],
+  cows: [{ speaker: 'player', text: '白ウシがのんびり草を食べている。' }],
+  waterBarrel: [
+    { speaker: 'player', text: '水くみ場の水樽だ。川の水がたっぷりたまっている。' },
+    { speaker: 'player', text: 'ここで飲み水を用意できそうだ。' },
+  ],
   cabin: [
     { speaker: 'player', text: '丸太の小屋と、石の塔だ。中はまた今度のぞいてみよう。' },
     { speaker: 'narration', text: '（室内の絵ができたら入れるようになります）' },

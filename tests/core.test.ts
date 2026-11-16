@@ -174,15 +174,20 @@ test('村：小屋と鍛冶小屋に入れ、畑の6区画と、慰霊碑・森�
   assert.deepEqual(spotAt('village', 1578, 1130), { kind: 'enter', id: 'smithy' });
   for (let i = 0; i < PLOTS.length; i++) assert.equal(plotSpot(i).plot, i);
   const looks: [number, number, string][] = [
-    [1478, 610, 'memorial'],
-    [1400, 610, 'forestGate'],
-    [1540, 760, 'cart'],
+    [1785, 790, 'memorial'],
+    [1530, 620, 'forestGate'],
+    [1540, 782, 'cart'],
     [905, 838, 'fountain'],
-    [1030, 830, 'bench'],
+    [1030, 880, 'bench'],
     [1000, 1460, 'sea'],
-    [1680, 790, 'wastelandSign'],
+    [1640, 808, 'wastelandSign'],
+    [500, 1020, 'waterBarrel'],
   ];
-  for (const [x, y, id] of looks) assert.deepEqual(spotAt('village', x, y), { kind: 'look', id }, id);
+  for (const [x, y, id] of looks) {
+    assert.deepEqual(spotAt('village', x, y), { kind: 'look', id }, id);
+    // 調べる場所の前には立てる
+    if (id !== 'fountain' && id !== 'sea') assert.equal(isBlockedAt('village', x, y), false, `${id} の前に立てる`);
+  }
 });
 
 test('調べられる場所には、すべて説明の台詞がある', () => {
