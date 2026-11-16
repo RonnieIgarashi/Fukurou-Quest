@@ -1,6 +1,6 @@
 // ゲームの状態。セーブデータにはこの形がそのまま入る（DOM に依存しない）。
 import { START_TIME } from './clock.js';
-import { HOME, PLOTS } from './map.js';
+import { AreaId, HOME, PLOTS } from './map.js';
 import { CropId, GoodsId, START_INVENTORY } from './params.js';
 
 export type ManaId = 'white' | 'earth' | 'water' | 'fire' | 'wind';
@@ -31,6 +31,8 @@ export interface Plot {
 
 export interface Companion {
   met: boolean;
+  /** いるエリア */
+  area: AreaId;
   x: number;
   y: number;
   dir: Dir;
@@ -40,8 +42,8 @@ export interface GameState {
   playerName: string;
   /** 1日目 0:00 からの通算分 */
   clock: number;
-  /** 位置は村の絵の座標（px）。y は足元 */
-  player: { x: number; y: number; dir: Dir };
+  /** いるエリアと、その絵の座標（px）。y は足元 */
+  player: { area: AreaId; x: number; y: number; dir: Dir };
   inv: {
     seeds: Record<CropId, number>;
     crops: Record<CropId, number>;
@@ -66,7 +68,7 @@ export function createGame(playerName: string): GameState {
   return {
     playerName,
     clock: START_TIME,
-    player: { x: HOME.x, y: HOME.y, dir: 'down' },
+    player: { area: 'village', x: HOME.x, y: HOME.y, dir: 'down' },
     inv: {
       seeds: { ...START_INVENTORY.seeds },
       crops: { ...START_INVENTORY.crops },
@@ -76,8 +78,8 @@ export function createGame(playerName: string): GameState {
     plots: PLOTS.map(newPlot),
     forge: { queue: [], ready: 0 },
     companions: {
-      moku: { met: true, x: HOME.x + 30, y: HOME.y + 4, dir: 'down' },
-      momo: { met: false, x: HOME.x - 30, y: HOME.y + 4, dir: 'down' },
+      moku: { met: true, area: 'village', x: HOME.x + 34, y: HOME.y + 4, dir: 'down' },
+      momo: { met: false, area: 'village', x: HOME.x - 34, y: HOME.y + 4, dir: 'down' },
     },
     flags: {},
     playSeconds: 0,

@@ -1,6 +1,6 @@
 // 起動と画面の切り替え（タイトル → セーブ枠 → 名前入力 → ムービー → フィールド）。
 import { dayOf, formatClock, hourFloat, START_TIME } from './core/clock.js';
-import { BEDS, isBlockedAt, Spot, spotAt, WORLD_W } from './core/map.js';
+import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, isBlockedAt, Spot, spotAt } from './core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from './core/names.js';
 import { CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
@@ -8,14 +8,14 @@ import { newSaveFile } from './core/save/schema.js';
 import { SaveStore, SaveSummary } from './core/save/store.js';
 import { advance, checkBedtime, GameEvent, mokuAsleep, momoAsleep } from './core/sim.js';
 import { createGame, Dir, GameState, MANA_IDS, MANA_NAMES, ManaId } from './core/state.js';
-import { fillName, Line, Speaker, STORY, STORY_MOVIE, StoryId } from './core/story.js';
+import { fillName, Line, LOOK, Speaker, STORY, STORY_MOVIE, StoryId } from './core/story.js';
 import { optionsFor, runTask, TaskOption } from './core/tasks.js';
 import { clearInput, endFrame, initInput, isHeld, wasPressed } from './input.js';
 import { BASE_H, BASE_W, Ctx, spriteImage, VIEW_W } from './view/gfx.js';
 import { movieExists, playMovie, portrait, preloadPortraits } from './view/media.js';
 import { drawCursor, drawFrame, Screen } from './view/screen.js';
 import { MOKU, MOMO, PLAYER, SpriteDef } from './view/sprites.js';
-import { cameraFor, darkness, drawWorld, PlayerAnim } from './view/world.js';
+import { cameraFor, darkness, drawWorld, PlayerAnim, updateCows } from './view/world.js';
 
 // ---------------------------------------------------------------- 準備
 
@@ -48,13 +48,35 @@ function go(next: Scene): void {
 
 // ---------------------------------------------------------------- タイトル
 
-const TITLE_ITEMS = ['はじめから', 'つづきから'];
+const TITLE_ITEMS = ['はじめから', 'つづきから', 'もじ'];
 let titleIdx = 0;
+
+// ---- ひらがなモード（端末ごとの設定。セーブデータには入れない）
+const KANA_KEY = 'fukurou-quest.kana';
+try {
+  screen.kana = window.localStorage.getItem(KANA_KEY) === '1';
+} catch {
+  /* 設定を読めない環境では漢字のまま */
+}
+function toggleKana(): void {
+  screen.kana = !screen.kana;
+  try {
+    window.localStorage.setItem(KANA_KEY, screen.kana ? '1' : '0');
+  } catch {
+    /* 保存できなくても、この場では切り替わる */
+  }
+  toast(screen.kana ? 'ひらがなで表示します。' : '漢字で表示します。');
+}
+const kanaLabel = () => (screen.kana ? 'もじ：ひらがな' : 'もじ：かんじ');
 const titleBg: GameState = createGame('');
 
 function updateTitle(): void {
-  if (wasPressed('up', 'down')) titleIdx = (titleIdx + 1) % TITLE_ITEMS.length;
-  if (wasPressed('ok')) void openSlots(titleIdx === 0 ? 'new' : 'continue');
+  if (wasPressed('up')) titleIdx = (titleIdx + TITLE_ITEMS.length - 1) % TITLE_ITEMS.length;
+  if (wasPressed('down')) titleIdx = (titleIdx + 1) % TITLE_ITEMS.length;
+  if (wasPressed('ok')) {
+    if (titleIdx === 2) toggleKana();
+    else void openSlots(titleIdx === 0 ? 'new' : 'continue');
+  }
 }
 
 function drawTitle(ctx: Ctx): void {
@@ -67,9 +89,9 @@ function drawTitle(ctx: Ctx): void {
   ctx.fillRect(0, 0, BASE_W, BASE_H);
   screen.text(BASE_W / 2, 44, 'フクロウクエスト', { size: 30, align: 'center', color: '#fff6d8', shadow: '#3a2a60' });
   screen.text(BASE_W / 2, 82, '— プロトタイプ —', { size: 10, align: 'center', color: '#c8c0f0' });
-  drawFrame(ctx, BASE_W / 2 - 52, 116, 104, 44);
+  drawFrame(ctx, BASE_W / 2 - 52, 116, 104, 60);
   TITLE_ITEMS.forEach((label, i) => {
-    screen.text(BASE_W / 2 - 30, 124 + i * 16, label, { size: 11, color: i === titleIdx ? '#ffe066' : '#f4f0ff' });
+    screen.text(BASE_W / 2 - 30, 124 + i * 16, label === 'もじ' ? kanaLabel() : label, { size: 11, color: i === titleIdx ? '#ffe066' : '#f4f0ff' });
     if (i === titleIdx) drawCursor(ctx, BASE_W / 2 - 44, 127 + i * 16, t);
   });
   screen.text(BASE_W / 2, 196, '↑↓ えらぶ　Z 決定　X もどる', { size: 9, align: 'center', color: '#b8b0e0' });
@@ -244,7 +266,6 @@ let slotId = 'slot1';
 let createdAt = new Date();
 let acc = 0;
 const anim: PlayerAnim = { moving: false, walked: 0 };
-let trail: { x: number; y: number }[] = [];
 
 type Beat = { kind: 'line'; line: Line } | { kind: 'movie'; id: string };
 let beats: Beat[] = [];
@@ -307,7 +328,6 @@ function resetField(): void {
   busy = null;
   movie = null;
   toasts = [];
-  trail = [{ x: game.player.x, y: game.player.y }];
 }
 
 async function startNewGame(slot: string, name: string): Promise<void> {
@@ -337,18 +357,20 @@ async function continueGame(slot: string): Promise<void> {
 
 // ---------------------------------------------------------------- フィールド：移動と調べる
 
-const SPEED = 110; // px/秒【仮】（村の絵の px）
+/** 歩く速さ・走る速さ（px/秒、絵の px）。2026-11-16「倍くらいの速さでも動けるように」→ Shift で走る【仮】 */
+const SPEED = 140;
+const RUN_SPEED = 280;
 const DIRS: Record<Dir, [number, number]> = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] };
 
 function blockedAt(x: number, y: number): boolean {
-  // 足元の小さな四角（幅14・高さ6）で当たりを取る
+  // 足元の小さな四角（幅16・高さ6）で当たりを取る
   const pts = [
-    [x - 7, y - 6],
-    [x + 7, y - 6],
-    [x - 7, y],
-    [x + 7, y],
+    [x - 8, y - 6],
+    [x + 8, y - 6],
+    [x - 8, y],
+    [x + 8, y],
   ];
-  return pts.some(([px, py]) => isBlockedAt(px, py));
+  return pts.some(([px, py]) => isBlockedAt(game.player.area, px, py));
 }
 
 function movePlayer(dt: number): void {
@@ -363,38 +385,72 @@ function movePlayer(dt: number): void {
   if (!anim.moving) return;
   p.dir = dx !== 0 ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
   const len = Math.hypot(dx, dy);
-  const vx = (dx / len) * SPEED * dt;
-  const vy = (dy / len) * SPEED * dt;
+  const sp = isHeld('run') ? RUN_SPEED : SPEED;
+  const vx = (dx / len) * sp * dt;
+  const vy = (dy / len) * sp * dt;
   const before = { x: p.x, y: p.y };
   if (!blockedAt(p.x + vx, p.y)) p.x += vx;
   if (!blockedAt(p.x, p.y + vy)) p.y += vy;
-  p.x = Math.max(8, Math.min(WORLD_W - 8, p.x));
+  p.x = Math.max(8, Math.min(AREAS[p.area].w - 8, p.x));
   anim.walked += Math.hypot(p.x - before.x, p.y - before.y);
-  const last = trail[trail.length - 1];
-  if (!last || Math.hypot(p.x - last.x, p.y - last.y) > 2) {
-    trail.push({ x: p.x, y: p.y });
-    if (trail.length > 60) trail.shift();
-  }
 }
 
-/** 仲間は飛べるので、地形を気にせず主人公についてくる。眠る時間は寝床へ */
+/**
+ * 仲間の動き（表示用。2026-11-16 Ronnie「ずっとくっついてこなくていい。家の周りを止まったり動いたり」）。
+ * 起きている間は村の小屋のまわりを気ままに飛び回り、眠る時間は小屋の中の寝床へ。
+ */
+const roam: Record<'moku' | 'momo', { tx: number; ty: number; wait: number }> = {
+  moku: { tx: HOME.x + 40, ty: HOME.y + 10, wait: 0 },
+  momo: { tx: HOME.x - 40, ty: HOME.y + 10, wait: 0 },
+};
+
 function moveCompanions(dt: number): void {
-  const follow = (c: GameState['companions']['moku'], back: number, asleep: boolean, bed: { x: number; y: number }) => {
-    if (!c.met) return;
-    const target = asleep ? bed : (trail[Math.max(0, trail.length - 1 - back)] ?? game.player);
-    const dx = target.x - c.x;
-    const dy = target.y - c.y;
+  for (const k of ['moku', 'momo'] as const) {
+    const c = game.companions[k];
+    if (!c.met) continue;
+    const asleep = k === 'moku' ? mokuAsleep(game.clock) : momoAsleep(game.clock);
+    const bed = BEDS[k];
+    if (asleep) {
+      if (c.area !== bed.area) {
+        c.area = bed.area;
+        c.x = bed.x;
+        c.y = bed.y;
+      }
+      const d = Math.hypot(bed.x - c.x, bed.y - c.y);
+      if (d > 1) {
+        const sp = Math.min(d, 50 * dt);
+        c.x += ((bed.x - c.x) / d) * sp;
+        c.y += ((bed.y - c.y) / d) * sp;
+      }
+      continue;
+    }
+    if (c.area !== 'village') {
+      // 起きたら小屋の前へ出てくる
+      c.area = 'village';
+      c.x = HOME.x + (k === 'moku' ? 30 : -30);
+      c.y = HOME.y + 16;
+    }
+    const r = roam[k];
+    const dx = r.tx - c.x;
+    const dy = r.ty - c.y;
     const d = Math.hypot(dx, dy);
-    const near = asleep ? 1 : 16;
-    if (d > near) {
-      const sp = Math.min(d, (asleep ? 60 : SPEED * 1.15) * dt * (d > 80 ? 2 : 1));
+    if (d > 2) {
+      const sp = Math.min(d, (k === 'moku' ? 34 : 46) * dt);
       c.x += (dx / d) * sp;
       c.y += (dy / d) * sp;
       if (Math.abs(dx) > 1) c.dir = dx < 0 ? 'left' : 'right';
+    } else {
+      r.wait -= dt;
+      if (r.wait <= 0) {
+        // 小屋のまわり（扉の前から半径150ほど）で、次に行く所を決める
+        const a = Math.random() * Math.PI * 2;
+        const rad = 30 + Math.random() * 120;
+        r.tx = HOME.x + Math.cos(a) * rad * 1.3;
+        r.ty = Math.max(HOME.y + 6, HOME.y + 60 + Math.sin(a) * rad * 0.6);
+        r.wait = 2 + Math.random() * 5;
+      }
     }
-  };
-  follow(game.companions.moku, 12, mokuAsleep(game.clock), BEDS.moku);
-  follow(game.companions.momo, 24, momoAsleep(game.clock), BEDS.momo);
+  }
 }
 
 /** 向いている先（足元から少し前）、なければ足元で調べられるもの */
@@ -402,12 +458,12 @@ function frontSpot(): Spot | null {
   const p = game.player;
   const [dx, dy] = DIRS[p.dir];
   const fy = p.y - 3;
-  return spotAt(p.x + dx * 16, fy + dy * 16) ?? spotAt(p.x, fy);
+  return spotAt(p.area, p.x + dx * 18, fy + dy * 18) ?? spotAt(p.area, p.x, fy);
 }
 
 const TALK: Record<'moku' | 'momo', { awake: string[]; asleep: string[] }> = {
   moku: {
-    awake: ['畑のマナ、足りてるかな？', '炉に入れた白いマナは、だんだん赤くなるんだって。', 'ホゥ。今日もいいお天気！', 'コオロギ、どこかにいないかなぁ。'],
+    awake: ['畑のマナ、足りてるかな？', '炉に入れた白いマナは、だんだん赤くなるんだって。', '今日もいいお天気だね！', 'コオロギ、どこかにいないかなぁ。', 'ホウホウ、なるほどね。'],
     asleep: ['スゥ……スゥ……'],
   },
   momo: {
@@ -419,13 +475,25 @@ const TALK: Record<'moku' | 'momo', { awake: string[]; asleep: string[] }> = {
 function talkTarget(): 'moku' | 'momo' | null {
   const p = game.player;
   const [dx, dy] = DIRS[p.dir];
-  const fx = p.x + dx * 12;
-  const fy = p.y + dy * 12;
+  const fx = p.x + dx * 16;
+  const fy = p.y + dy * 16;
   for (const k of ['moku', 'momo'] as const) {
     const c = game.companions[k];
-    if (c.met && Math.hypot(c.x - fx, c.y - fy) < 14) return k;
+    if (c.met && c.area === p.area && Math.hypot(c.x - fx, c.y - fy) < 22) return k;
   }
   return null;
+}
+
+/** 建物に出入りした時刻（画面を暗転から戻す演出用） */
+let enteredAt = -10;
+
+function moveTo(area: AreaId, pos: { x: number; y: number }, dir: Dir): void {
+  const p = game.player;
+  p.area = area;
+  p.x = pos.x;
+  p.y = pos.y;
+  p.dir = dir;
+  enteredAt = t;
 }
 
 function interact(): void {
@@ -438,6 +506,12 @@ function interact(): void {
   }
   const spot = frontSpot();
   if (!spot) return;
+  if (spot.kind === 'enter') return moveTo(spot.id as AreaId, ENTRANCES[spot.id as AreaId], 'up');
+  if (spot.kind === 'exit') {
+    const from = game.player.area as Exclude<AreaId, 'village'>;
+    return moveTo('village', EXIT_TO_VILLAGE[from], 'down');
+  }
+  if (spot.kind === 'look') return queueLines(LOOK[spot.id ?? ''] ?? []);
   menu = { kind: 'task', spot, options: optionsFor(game, spot), idx: 0 };
 }
 
@@ -460,7 +534,6 @@ function runChosenTask(spot: Spot, opt: TaskOption): void {
   }
   const sleep = opt.id === 'sleep';
   busy = { from: before, to: game.clock, t0: t, dur: sleep ? 2.2 : Math.max(0.5, Math.min(1.6, res.minutes / 60)), sleep, after: finish };
-  if (sleep) trail = [{ x: game.player.x, y: game.player.y }];
 }
 
 // ---------------------------------------------------------------- フィールド：更新
@@ -480,6 +553,7 @@ function updateField(dt: number): void {
 
   movePlayer(dt);
   moveCompanions(dt);
+  updateCows(dt);
   if (wasPressed('ok')) interact();
   else if (wasPressed('menu', 'cancel')) menu = { kind: 'main', idx: 0 };
 
@@ -492,8 +566,7 @@ function updateField(dt: number): void {
     handleEvents(advance(game, mins));
     const bed = checkBedtime(game);
     if (bed.length) {
-      trail = [{ x: game.player.x, y: game.player.y }];
-      busy = { from: game.clock, to: game.clock, t0: t, dur: 2.2, sleep: true, after: () => handleEvents(bed) };
+          busy = { from: game.clock, to: game.clock, t0: t, dur: 2.2, sleep: true, after: () => handleEvents(bed) };
     }
   }
 }
@@ -538,7 +611,7 @@ function updateMovie(): void {
   else if (t - movie.t0 > 3) endMovie(movie);
 }
 
-const MAIN_ITEMS = ['もちもの', 'なかま', 'セーブ', 'タイトルへ', 'とじる'];
+const MAIN_ITEMS = ['もちもの', 'なかま', 'セーブ', 'もじ', 'タイトルへ', 'とじる'];
 
 function updateMenu(): void {
   if (!menu) return;
@@ -561,6 +634,7 @@ function updateMenu(): void {
   const item = MAIN_ITEMS[menu.idx];
   if (item === 'もちもの') menu = { kind: 'items' };
   else if (item === 'なかま') menu = { kind: 'party' };
+  else if (item === 'もじ') toggleKana();
   else if (item === 'セーブ') {
     void saveNow().then(() => toast('日記帳に記録しました。'));
     menu = null;
@@ -587,14 +661,22 @@ function displayClock(): number {
   return Math.round(busy.from + (busy.to - busy.from) * k);
 }
 
+/** マナの玉（2026-11-16「四角じゃなく丸」） */
 function drawOrb(ctx: Ctx, x: number, y: number, color: string): void {
+  const cx = x + 3.5;
+  const cy = y + 3.5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 3.6, 0, Math.PI * 2);
   ctx.fillStyle = '#1d1828';
-  ctx.fillRect(x, y + 1, 7, 5);
-  ctx.fillRect(x + 1, y, 5, 7);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, 2.8, 0, Math.PI * 2);
   ctx.fillStyle = color;
-  ctx.fillRect(x + 1, y + 1, 5, 5);
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  ctx.fillRect(x + 2, y + 2, 1, 1);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx - 1, cy - 1, 0.9, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255,255,255,0.8)';
+  ctx.fill();
 }
 
 function drawHud(ctx: Ctx, clock: number): void {
@@ -663,33 +745,37 @@ const FALLBACK_FACE: Record<Exclude<Speaker, 'narration'>, SpriteDef> = {
 };
 
 function drawDialog(ctx: Ctx, line: Line): void {
+  // 話し手がいるときは、レジェンドオブマナのように文の左に顔を出す
   const hasFace = line.speaker !== 'narration';
+  const tx = hasFace ? 74 : 8;
+  const tw = hasFace ? 302 : 368;
   if (hasFace) {
-    drawFrame(ctx, 8, 96, 56, 56, 0.92);
+    drawFrame(ctx, 8, 146, 64, 64, 0.92);
     const img = portrait(line.speaker);
-    if (img) screen.image(img, 11, 99, 50, 50);
+    if (img) screen.image(img, 11, 149, 58, 58);
     else {
       // 顔画像が無いときは、ドット絵の上半分（顔）を大きく出す
       const def = FALLBACK_FACE[line.speaker as Exclude<Speaker, 'narration'>];
       const sh = def.h > 32 ? 26 : def.h;
-      const sc = 48 / Math.max(def.w, sh);
-      ctx.drawImage(spriteImage(def), 0, 0, def.w, sh, 36 - (def.w * sc) / 2, 124 - (sh * sc) / 2, def.w * sc, sh * sc);
+      const sc = 54 / Math.max(def.w, sh);
+      ctx.drawImage(spriteImage(def), 0, 0, def.w, sh, 40 - (def.w * sc) / 2, 178 - (sh * sc) / 2, def.w * sc, sh * sc);
     }
   }
-  drawFrame(ctx, 8, 152, 368, 58, 0.92);
-  let y = 157;
+  drawFrame(ctx, tx, 146, tw, 64, 0.92);
+  let y = 151;
   const name = SPEAKER_NAMES[line.speaker]();
   if (name) {
-    screen.text(18, y, name, { size: 10, color: '#ffe066' });
+    screen.text(tx + 10, y, name, { size: 10, color: '#ffe066' });
     y += 13;
   }
   const shown = [...line.text].slice(0, Math.floor(lineShown)).join('');
-  screen.wrap(shown, 348, 11).slice(0, name ? 3 : 4).forEach((l, i) => screen.text(18, y + i * 13, l, { size: 11 }));
+  screen.wrap(shown, tw - 20, 11).slice(0, name ? 3 : 4).forEach((l, i) => screen.text(tx + 10, y + i * 13, l, { size: 11 }));
   if (Math.floor(lineShown) >= [...line.text].length && Math.floor(t * 2) % 2 === 0) {
+    const ax = tx + tw - 12;
     ctx.fillStyle = '#ffe066';
-    ctx.fillRect(364, 202, 5, 1);
-    ctx.fillRect(365, 203, 3, 1);
-    ctx.fillRect(366, 204, 1, 1);
+    ctx.fillRect(ax, 202, 5, 1);
+    ctx.fillRect(ax + 1, 203, 3, 1);
+    ctx.fillRect(ax + 2, 204, 1, 1);
   }
 }
 
@@ -724,7 +810,7 @@ function drawMenu(ctx: Ctx): void {
     const mm = menu!;
     const sel = mm.kind === 'main' && i === mm.idx;
     if (sel) drawCursor(ctx, BASE_W - 90, 56 + i * 16, t);
-    screen.text(BASE_W - 80, 53 + i * 16, label, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
+    screen.text(BASE_W - 80, 53 + i * 16, label === 'もじ' ? kanaLabel() : label, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
   });
   if (menu.kind === 'items') {
     drawFrame(ctx, 40, 46, 230, 134);
@@ -771,15 +857,21 @@ function drawField(ctx: Ctx): void {
   }
   const clock = displayClock();
   drawWorld(screen.world, game, anim, t, clock);
+  // 建物の出入りのあとは、暗い所からふわっと明るくする
+  const fade = 1 - Math.min(1, (t - enteredAt) / 0.45);
+  if (fade > 0) {
+    ctx.fillStyle = `rgba(4, 3, 12, ${fade})`;
+    ctx.fillRect(0, 0, BASE_W, BASE_H);
+  }
   drawHud(ctx, clock);
 
   // 調べられる物の前では、主人公の頭上に案内を出す
   if (!menu && !busy && !beats.length && (frontSpot() || talkTarget())) {
-    // フィールド（640x360）の座標を UI（384x216）の座標に直す
+    // フィールド（800x450）の座標を UI（384x216）の座標に直す
     const cam = cameraFor(game);
     const k = BASE_W / VIEW_W;
     const cx = Math.round((game.player.x - cam.x) * k);
-    const cy = Math.round((game.player.y - cam.y - 52) * k);
+    const cy = Math.round((game.player.y - cam.y - 66) * k);
     drawFrame(ctx, cx - 10, cy - 12, 20, 12, 0.85);
     screen.text(cx, cy - 11, 'Z', { size: 9, align: 'center', color: '#ffe066' });
   }

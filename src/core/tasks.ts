@@ -48,12 +48,13 @@ function canSleep(s: GameState): boolean {
 
 export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
   switch (spot.kind) {
-    case 'door':
+    case 'bed':
       return [
         { id: 'sleep', label: '寝る（次の朝まで）', minutes: null, disabled: canSleep(s) ? null : '18:00 をすぎたら寝られる' },
-        { id: 'rest', label: '休む', minutes: TASK_MINUTES.rest, disabled: null },
-        { id: 'save', label: '日記をつける（セーブ）', minutes: 0, disabled: null },
+        { id: 'rest', label: '横になって休む', minutes: TASK_MINUTES.rest, disabled: null },
       ];
+    case 'desk':
+      return [{ id: 'save', label: '日記をつける（セーブ）', minutes: 0, disabled: null }];
     case 'forge':
       return [
         {
@@ -91,8 +92,11 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
       if (p.stage === 'ready') return [{ id: 'harvest', label: '収穫する', minutes: TASK_MINUTES.harvest, disabled: null }];
       return [{ id: 'lookPlot', label: '様子を見る', minutes: 0, disabled: null }];
     }
-    case 'sign':
-      return [{ id: 'readSign', label: '読む', minutes: 0, disabled: null }];
+    // 出入り・見るだけの場所はタスクを持たない（main.ts が扱う）
+    case 'enter':
+    case 'exit':
+    case 'look':
+      return [];
   }
 }
 
@@ -128,7 +132,7 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     messages.push(`ぐっすり眠った。${formatClock(s.clock)}、朝になった。`);
   } else if (id === 'rest') {
     pass(TASK_MINUTES.rest);
-    messages.push('小屋でひと休みした。');
+    messages.push('ベッドで横になって、ひと休みした。');
   } else if (id === 'save') {
     events.push({ kind: 'autosave' });
     messages.push('今日のことを日記に書いた。（セーブしました）');
@@ -176,8 +180,6 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     pass(TASK_MINUTES.harvest);
   } else if (id === 'lookPlot') {
     messages.push(plotStatus(s, spot));
-  } else if (id === 'readSign') {
-    messages.push('「この先、荒野」……まだ行けないようだ。（プロトタイプは村エリアのみ）');
   }
   return { messages, events, minutes: s.clock - before };
 }

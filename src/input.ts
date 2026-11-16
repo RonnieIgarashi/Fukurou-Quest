@@ -1,7 +1,7 @@
 // キーボード入力。押しっぱなし（held）と、押した瞬間（pressed）を分けて持つ。
 // 将来スマホ対応するときは、画面上のボタンから press()/release() を呼べばよい。
 
-export type Action = 'up' | 'down' | 'left' | 'right' | 'ok' | 'cancel' | 'menu';
+export type Action = 'up' | 'down' | 'left' | 'right' | 'ok' | 'cancel' | 'menu' | 'run';
 
 const KEYMAP: Record<string, Action> = {
   ArrowUp: 'up',
@@ -18,6 +18,8 @@ const KEYMAP: Record<string, Action> = {
   KeyX: 'cancel',
   Backspace: 'cancel',
   Escape: 'menu',
+  ShiftLeft: 'run',
+  ShiftRight: 'run',
 };
 
 const held = new Set<Action>();

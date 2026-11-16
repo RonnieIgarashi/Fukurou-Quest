@@ -3,8 +3,11 @@ import { dayOf } from '../clock.js';
 import { createGame, GameState } from '../state.js';
 import { SaveFile, SaveSummary } from './store.js';
 
-/** 1→2：村が一枚絵になり、座標が変わった（畑の番号と中身はそのまま） */
-export const SAVE_SCHEMA = 2;
+/**
+ * 1→2：村が一枚絵になり、座標が変わった（畑の番号と中身はそのまま）
+ * 2→3：エリア（村・小屋の中・鍛冶小屋の中）を持つようになった。無ければ村
+ */
+export const SAVE_SCHEMA = 3;
 
 export function newSaveFile(slotId: string, game: GameState, now: Date, ownerId: string | null = null): SaveFile {
   const iso = now.toISOString();

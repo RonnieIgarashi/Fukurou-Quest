@@ -1,7 +1,7 @@
 // 時間を進める処理。リアルタイムの時計もタスクの時間スキップも、必ずこの advance() を通す
 // （仕様書の原則「時間更新処理を二重実装しない」）。
 import { dayOf, isPastBedtime, minuteOfDay, nextMorning } from './clock.js';
-import { HOME } from './map.js';
+import { WAKE } from './map.js';
 import { CROPS, FARM_MANA_PER_PLOT_PER_DAY, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
 import { FARM_MANA, GameState } from './state.js';
 import { StoryId } from './story.js';
@@ -104,11 +104,12 @@ export function advance(s: GameState, minutes: number): GameEvent[] {
   return out;
 }
 
-/** 眠って次の朝 6:00 まで進め、小屋の前に戻す */
+/** 眠って次の朝 6:00 まで進め、小屋の中（ベッドの横）で目覚めさせる */
 export function sleepUntilMorning(s: GameState): GameEvent[] {
   const events = advance(s, nextMorning(s.clock) - s.clock);
-  s.player.x = HOME.x;
-  s.player.y = HOME.y;
+  s.player.area = WAKE.area;
+  s.player.x = WAKE.x;
+  s.player.y = WAKE.y;
   s.player.dir = 'down';
   events.push({ kind: 'autosave' });
   return events;

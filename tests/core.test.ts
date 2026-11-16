@@ -1,19 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayOf, formatClock, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
-import { HOME, isBlockedAt, PLOTS, Spot, spotAt } from '../src/core/map.js';
+import { AREAS, HOME, isBlockedAt, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from '../src/core/names.js';
 import { CROPS, FORGE, MINUTES_PER_DAY, TIME } from '../src/core/params.js';
 import { LocalSaveStore, MemoryKeyValue } from '../src/core/save/localStore.js';
 import { migrate, newSaveFile, SAVE_SCHEMA } from '../src/core/save/schema.js';
 import { advance, checkBedtime, mokuAsleep, momoAsleep, sleepUntilMorning } from '../src/core/sim.js';
 import { createGame } from '../src/core/state.js';
+import { LOOK } from '../src/core/story.js';
 import { optionsFor, runTask } from '../src/core/tasks.js';
 
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
-const plotSpot = (i: number): Spot => spotAt((PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
-const FORGE_XY: [number, number] = [1578, 1130];
-const DOOR_XY: [number, number] = [1015, 640];
+const plotSpot = (i: number): Spot => spotAt('village', (PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
+const forgeSpot = (): Spot => spotAt('smithy', 400, 200)!;
+const bedSpot = (): Spot => spotAt('hut', 280, 220)!;
 
 // ---------------------------------------------------------------- 時計
 
@@ -45,7 +46,7 @@ test('一度に進めても、1分ずつ進めても同じ状態になる', () =
     g.inv.mana.fire = 5;
     runTask(g, plotSpot(0), 'till');
     runTask(g, plotSpot(0), 'plant:bean');
-    runTask(g, spotAt(...FORGE_XY)!, 'feedForge');
+    runTask(g, forgeSpot(), 'feedForge');
   }
   advance(a, 3 * MINUTES_PER_DAY);
   for (let i = 0; i < 3 * MINUTES_PER_DAY; i++) advance(b, 1);
@@ -87,7 +88,7 @@ test('火のマナが無いと生育が止まる（4属性のどれかが欠け�
 
 test('炉：白のマナが一定時間で火のマナに変わり、取り出せる', () => {
   const g = createGame('テスト');
-  const forge = spotAt(...FORGE_XY)!;
+  const forge = forgeSpot();
   assert.equal(forge.kind, 'forge');
   runTask(g, forge, 'feedForge');
   assert.equal(g.forge.queue.length, 1);
@@ -101,7 +102,7 @@ test('炉：白のマナが一定時間で火のマナに変わり、取り出�
 test('炉は容量を超えて入れられない', () => {
   const g = createGame('テスト');
   g.inv.goods.wood = 10;
-  const forge = spotAt(...FORGE_XY)!;
+  const forge = forgeSpot();
   for (let i = 0; i < FORGE.CAPACITY; i++) runTask(g, forge, 'feedForge');
   const opt = optionsFor(g, forge).find((o) => o.id === 'feedForge')!;
   assert.equal(opt.disabled, '炉がいっぱい');
@@ -109,7 +110,7 @@ test('炉は容量を超えて入れられない', () => {
 
 test('炉には燃料が要り、薪→毛→皮の順に使う', () => {
   const g = createGame('テスト');
-  const forge = spotAt(...FORGE_XY)!;
+  const forge = forgeSpot();
   g.inv.goods.wood = 1;
   g.inv.goods.hair = 1;
   runTask(g, forge, 'feedForge');
@@ -141,18 +142,19 @@ test('最初の夜と、3日目の朝にイベントが起きる（1回だけ）
   assert.ok(!e3.some((e) => e.kind === 'story'));
 });
 
-test('深夜2時を過ぎると眠ってしまい、6:00 に小屋の前で目覚める', () => {
+test('深夜2時を過ぎると眠ってしまい、6:00 に小屋の中で目覚める', () => {
   const g = createGame('テスト');
   advance(g, at(2, 2) - g.clock);
   const events = checkBedtime(g);
   assert.ok(events.some((e) => e.kind === 'forcedSleep'));
   assert.equal(formatClock(g.clock), '6:00');
   assert.equal(dayOf(g.clock), 2);
+  assert.equal(g.player.area, WAKE.area);
 });
 
 test('寝られるのは 18:00 以降', () => {
   const g = createGame('テスト');
-  const door = spotAt(...DOOR_XY)!;
+  const door = bedSpot();
   assert.ok(optionsFor(g, door).find((o) => o.id === 'sleep')!.disabled);
   advance(g, at(1, 18) - g.clock);
   assert.equal(optionsFor(g, door).find((o) => o.id === 'sleep')!.disabled, null);
@@ -167,24 +169,50 @@ test('100日目の朝にドラゴン来訪のイベント', () => {
 
 // ---------------------------------------------------------------- 地形
 
-test('扉・炉・立て札・畑の6区画を調べられる', () => {
-  assert.equal(spotAt(...DOOR_XY)?.kind, 'door');
-  assert.equal(spotAt(...FORGE_XY)?.kind, 'forge');
-  assert.equal(spotAt(1680, 790)?.kind, 'sign');
+test('村：小屋と鍛冶小屋に入れ、畑の6区画と、慰霊碑・森の入口・荷車・噴水・ベンチ・海を調べられる', () => {
+  assert.deepEqual(spotAt('village', 1015, 640), { kind: 'enter', id: 'hut' });
+  assert.deepEqual(spotAt('village', 1578, 1130), { kind: 'enter', id: 'smithy' });
   for (let i = 0; i < PLOTS.length; i++) assert.equal(plotSpot(i).plot, i);
+  const looks: [number, number, string][] = [
+    [1478, 610, 'memorial'],
+    [1400, 610, 'forestGate'],
+    [1540, 760, 'cart'],
+    [905, 838, 'fountain'],
+    [1030, 830, 'bench'],
+    [1000, 1460, 'sea'],
+    [1680, 790, 'wastelandSign'],
+  ];
+  for (const [x, y, id] of looks) assert.deepEqual(spotAt('village', x, y), { kind: 'look', id }, id);
 });
 
-test('小屋の前・畑の中・浜辺は歩け、川・噴水・森・畑の柵は通れない', () => {
-  assert.equal(isBlockedAt(HOME.x, HOME.y), false);
-  assert.equal(isBlockedAt(1240, 700), false); // 畑の中
-  assert.equal(isBlockedAt(1160, 790), false); // 畑の入口
-  assert.equal(isBlockedAt(1000, 1380), false); // 浜辺
-  assert.equal(isBlockedAt(250, 1050), false); // 橋
-  assert.equal(isBlockedAt(320, 900), true); // 川
-  assert.equal(isBlockedAt(905, 838), true); // 噴水
-  assert.equal(isBlockedAt(1000, 400), true); // 森
-  assert.equal(isBlockedAt(1250, 790), true); // 畑の前の柵
-  assert.equal(isBlockedAt(700, 1230), true); // 石垣
+test('調べられる場所には、すべて説明の台詞がある', () => {
+  for (const a of Object.values(AREAS))
+    for (const s of a.spots) if (s.spot.kind === 'look') assert.ok(LOOK[s.spot.id!]?.length, s.spot.id);
+});
+
+test('室内：小屋はベッド・机・出口、鍛冶小屋は炉・出口', () => {
+  assert.equal(spotAt('hut', 280, 220)?.kind, 'bed');
+  assert.equal(spotAt('hut', 480, 260)?.kind, 'desk');
+  assert.deepEqual(spotAt('hut', 400, 410), { kind: 'exit', id: 'village' });
+  assert.equal(spotAt('smithy', 400, 200)?.kind, 'forge');
+  assert.equal(isBlockedAt('hut', 400, 330), false);
+  assert.equal(isBlockedAt('hut', 280, 220), true); // ベッド
+  assert.equal(isBlockedAt('hut', 100, 300), true); // 壁の外
+});
+
+test('村：小屋の前・畑の中・浜辺・慰霊碑の前は歩け、川・噴水・森・畑の柵・石垣は通れない', () => {
+  const v = (x: number, y: number) => isBlockedAt('village', x, y);
+  assert.equal(v(HOME.x, HOME.y), false);
+  assert.equal(v(1240, 700), false); // 畑の中
+  assert.equal(v(1160, 790), false); // 畑の入口
+  assert.equal(v(1000, 1380), false); // 浜辺
+  assert.equal(v(250, 1050), false); // 橋
+  assert.equal(v(1478, 640), false); // 慰霊碑の前
+  assert.equal(v(320, 900), true); // 川
+  assert.equal(v(905, 838), true); // 噴水
+  assert.equal(v(1000, 400), true); // 森
+  assert.equal(v(1250, 790), true); // 畑の前の柵
+  assert.equal(v(700, 1230), true); // 石垣
 });
 
 // ---------------------------------------------------------------- 名前
@@ -227,6 +255,7 @@ test('古い・欠けたデータは初期値で補い、新しい版や壊れ�
   const m = migrate({ schema: SAVE_SCHEMA, slotId: 'slot1', game: { playerName: 'ロニー', clock: 999 } });
   assert.equal(m?.game.clock, 999);
   assert.equal(m?.game.plots.length, PLOTS.length);
+  assert.equal(m?.game.player.area, 'village'); // 版2以前はエリアが無い → 村
   // 版1のデータは、位置を小屋の前に戻し、畑の中身は残す
   const old = createGame('ロニー');
   old.player.x = 5;
