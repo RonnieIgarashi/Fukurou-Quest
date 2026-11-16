@@ -67,8 +67,10 @@ export class Screen {
     this.canvas.height = VIEW_H * this.viewScale;
     this.scale = this.canvas.width / BASE_W;
     [this.uiCanvas, this.base] = makeCanvas(this.canvas.width, this.canvas.height);
-    this.canvas.style.width = `${this.canvas.width / dpr}px`;
-    this.canvas.style.height = `${this.canvas.height / dpr}px`;
+    // 640x360 より狭いウィンドウ（スマホなど）では、はみ出さないように縮めて表示する
+    const cssW = Math.min(this.canvas.width / dpr, wrap.clientWidth, (wrap.clientHeight * VIEW_W) / VIEW_H);
+    this.canvas.style.width = `${cssW}px`;
+    this.canvas.style.height = `${(cssW * VIEW_H) / VIEW_W}px`;
   }
 
   begin(): Ctx {
