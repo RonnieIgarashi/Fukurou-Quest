@@ -1,8 +1,9 @@
 // 粒（パーティクル）で出す、水しぶき・もや・煙・火の粉（2026-11-16 Ronnie「水と煙はパーティクルをリアルに」）。
 // 1粒ずつ位置・速さ・寿命を持ち、毎フレーム動かして、だんだん薄く・大きく（煙）したり、落ちて消えたり（水）する。
+import { art } from './art.js';
 import { Ctx, makeCanvas, rng } from './gfx.js';
 
-export type Kind = 'puff' | 'drop' | 'mist' | 'foam' | 'spark';
+export type Kind = 'puff' | 'drop' | 'mist' | 'foam' | 'spark' | 'leaf';
 
 export interface Particle {
   kind: Kind;
@@ -164,6 +165,25 @@ export class Particles {
           ctx.beginPath();
           ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
           ctx.fill();
+          break;
+        }
+        case 'leaf': {
+          // 葉っぱ（Ronnie の素材）。左右に揺れながら、くるくる回って落ちる
+          const img = art(`leaf-${p.look}`);
+          if (!img) break;
+          const sway = Math.sin(p.age * 2.2 + p.rot) * 7;
+          const turn = p.rot + Math.sin(p.age * 1.7 + p.rot) * 0.9;
+          // 裏返るように、横幅を周期的に縮める
+          const flip = 0.35 + 0.65 * Math.abs(Math.cos(p.age * 1.3 + p.rot));
+          const w = img.naturalWidth * p.size;
+          const h = img.naturalHeight * p.size;
+          ctx.save();
+          ctx.globalAlpha = p.alpha * Math.min(1, p.age * 3) * Math.min(1, (p.life - p.age) * 1.5);
+          ctx.translate(p.x + sway, p.y);
+          ctx.rotate(turn);
+          ctx.scale(flip, 1);
+          ctx.drawImage(img, -w / 2, -h / 2, w, h);
+          ctx.restore();
           break;
         }
         case 'spark': {

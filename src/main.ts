@@ -473,7 +473,12 @@ function moveCompanions(dt: number): void {
       const sp = Math.min(d, (k === 'moku' ? 34 : 46) * dt);
       c.x += (dx / d) * sp;
       c.y += (dy / d) * sp;
-      if (Math.abs(dx) > 1) c.dir = dx < 0 ? 'left' : 'right';
+      // 向き（素材の絵は正面・後ろ・横の3つ。横の動きを少し優先する）
+      if (Math.abs(dx) > Math.abs(dy) * 0.7) c.dir = dx < 0 ? 'left' : 'right';
+      else c.dir = dy < 0 ? 'up' : 'down';
+    } else if (r.wait > 0 && c.dir === 'up') {
+      // 止まったら、こちら（正面）を向く
+      c.dir = 'down';
     } else {
       r.wait -= dt;
       if (r.wait <= 0) {

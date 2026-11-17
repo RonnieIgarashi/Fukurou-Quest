@@ -4,9 +4,10 @@ import { hourFloat } from '../core/clock.js';
 import { AreaId, AREAS, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
 import { CROPS, CropId } from '../core/params.js';
 import { mokuAsleep, momoAsleep } from '../core/sim.js';
-import { Companion, GameState, Plot } from '../core/state.js';
+import { Companion, Dir, GameState, Plot } from '../core/state.js';
 import { Ctx, drawAtFeet, drawShadow, makeCanvas, rng, spriteImage, VIEW_H, VIEW_W } from './gfx.js';
 import { interiorImage, SMITHY_FIRE } from './interior.js';
+import { art as spriteArt, companionPose, COMPANION_SCALE, COW_SCALE, cowPose, drawArtAtFeet, LEAF_COUNT } from './art.js';
 import { Emitter, Particles, rand, smoke } from './particles.js';
 import { MOKU, MOMO, PLAYER, ZZZ } from './sprites.js';
 
@@ -228,12 +229,6 @@ function areaArt(area: AreaId) {
   return a;
 }
 
-const COW_SRC = ['assets/sprites/cow-white-a.png', 'assets/sprites/cow-white-b.png', 'assets/sprites/cow-black.png'];
-const cowImgs = COW_SRC.map((src) => {
-  const i = new Image();
-  i.src = src;
-  return i;
-});
 
 export function cameraFor(s: GameState): Camera {
   const a = AREAS[s.player.area];
@@ -246,9 +241,7 @@ export function cameraFor(s: GameState): Camera {
 // ---------------------------------------------------------------- ウシ（牧場の中を歩き回る。表示だけの動き）
 
 interface Cow {
-  img: number;
-  /** 絵の倍率（黒ウシは元の絵が大きいので縮める） */
-  scale: number;
+  color: 'white' | 'black';
   /** 歩き回る範囲 */
   area: Poly;
   speed: number;
@@ -256,9 +249,7 @@ interface Cow {
   y: number;
   tx: number;
   ty: number;
-  /** 元の絵が右向きなら 1、左向きなら -1 */
-  faceSrc: number;
-  face: number;
+  dir: Dir;
   wait: number;
   walking: boolean;
   phase: number;
@@ -267,15 +258,15 @@ interface Cow {
 const cowRng = rng(4242);
 const cows: Cow[] = [
   // 牧場の白ウシ2頭（重ならないように、離れた所から始める）
-  { img: 0, scale: 1, area: PEN, speed: 13, x: 616, y: 800, tx: 616, ty: 800, faceSrc: -1, face: -1, wait: 3, walking: false, phase: 0 },
-  { img: 1, scale: 1, area: PEN, speed: 13, x: 530, y: 866, tx: 530, ty: 866, faceSrc: 1, face: 1, wait: 6, walking: false, phase: 1.3 },
+  { color: 'white', area: PEN, speed: 13, x: 616, y: 806, tx: 616, ty: 806, dir: 'left', wait: 3, walking: false, phase: 0 },
+  { color: 'white', area: PEN, speed: 13, x: 530, y: 866, tx: 530, ty: 866, dir: 'right', wait: 6, walking: false, phase: 1.3 },
   // 荒野の黒ウシ
-  { img: 2, scale: 0.62, area: WASTE, speed: 9, x: 1860, y: 1060, tx: 1860, ty: 1060, faceSrc: -1, face: -1, wait: 4, walking: false, phase: 2.1 },
+  { color: 'black', area: WASTE, speed: 9, x: 1860, y: 1060, tx: 1860, ty: 1060, dir: 'left', wait: 4, walking: false, phase: 2.1 },
 ];
 
+/** 当たりに使う体の幅（横向きの絵の幅） */
 function cowWidth(c: Cow): number {
-  const img = cowImgs[c.img];
-  return (img.naturalWidth || 80) * c.scale;
+  return (c.color === 'white' ? 180 : 190) * COW_SCALE;
 }
 
 /** 2頭の体が重なるか（横は体の幅、縦は奥行きの分だけ見る） */
@@ -315,7 +306,9 @@ export function updateCows(dt: number): void {
         const sp = Math.min(d, c.speed * dt);
         const nx = c.x + (dx / d) * sp;
         const ny = c.y + (dy / d) * sp;
-        if (Math.abs(dx) > 2) c.face = dx > 0 ? 1 : -1;
+        // 横に動く量が大きければ横向き、縦なら正面か後ろ向き（奥行きのある歩き方に見えるよう、横を優先）
+        if (Math.abs(dx) > Math.abs(dy) * 0.6) c.dir = dx > 0 ? 'right' : 'left';
+        else if (Math.abs(dy) > 2) c.dir = dy > 0 ? 'down' : 'up';
         // ほかの牛にぶつかるなら、そこで止まって行き先を選び直す
         if (cows.some((o) => o !== c && o.area === c.area && overlaps(c, nx, ny, o, o.x, o.y))) {
           c.walking = false;
@@ -340,21 +333,17 @@ function cowDrawable(c: Cow, t: number): Drawable {
     y: c.y,
     x: c.x,
     draw: (ctx) => {
-      const img = cowImgs[c.img];
-      if (!img.complete || !img.naturalWidth) return;
-      const w = img.naturalWidth * c.scale;
-      const h = img.naturalHeight * c.scale;
-      const bob = c.walking ? Math.abs(Math.sin(t * 7 + c.phase)) * 1.2 : 0;
-      const tilt = c.walking ? Math.sin(t * 7 + c.phase) * 0.025 : 0;
+      // 歩いている間は、立ち姿と歩き姿の絵を交互に（横向きのときだけ）
+      const step = c.walking && Math.floor(t * 3 + c.phase) % 2 === 1;
+      const pose = cowPose(c.color, c.dir, step);
+      const img = spriteArt(pose.name);
+      if (!img) return;
+      const w = img.naturalWidth * COW_SCALE;
+      const bob = c.walking ? Math.abs(Math.sin(t * 6 + c.phase)) * 1.0 : 0;
       // 立ち止まっているときは、息づかい（体がわずかにふくらむ）
-      const breath = c.walking ? 0 : Math.sin(t * 1.4 + c.phase) * 0.012;
-      drawShadow(ctx, c.x, c.y - 2, w * 0.8);
-      ctx.save();
-      ctx.translate(c.x, c.y - bob);
-      ctx.rotate(tilt);
-      ctx.scale(c.face * c.faceSrc, 1 + breath);
-      ctx.drawImage(img, -w / 2, -h + 4 * c.scale, w, h);
-      ctx.restore();
+      const breath = c.walking ? 1 : 1 + Math.sin(t * 1.4 + c.phase) * 0.012;
+      drawShadow(ctx, c.x, c.y - 2, Math.min(w, 60) * 0.85);
+      drawArtAtFeet(ctx, img, c.x, c.y + 2 - bob, COW_SCALE, pose.mirror, breath);
     },
   };
 }
@@ -711,6 +700,35 @@ function splash(ps: Particles, x: number, y: number, n: number, power: number): 
   }
 }
 
+/** 木から落ちる葉っぱ（Ronnie の素材）。木ごとに、ときどき1枚ずつ */
+const leafEmit = Object.fromEntries(Object.keys(SWAYS).map((k) => [k, new Emitter(0.12)])) as Record<string, Emitter>;
+
+function emitLeaves(dt: number, cam: Camera): void {
+  for (const [name, s] of Object.entries(SWAYS)) {
+    // 画面の近くの木だけ
+    if (s.cx + s.rx < cam.x - 60 || s.cx - s.rx > cam.x + VIEW_W + 60 || s.cy - s.ry > cam.y + VIEW_H || s.pivotY + 60 < cam.y) continue;
+    for (let i = leafEmit[name].count(dt); i > 0; i--) {
+      const a = rand(0, Math.PI * 2);
+      const r = Math.sqrt(rand());
+      const floor = s.pivotY + rand(14, 44);
+      skyFx.add({
+        kind: 'leaf',
+        x: s.cx + Math.cos(a) * s.rx * r * 0.8,
+        y: s.cy + Math.sin(a) * s.ry * r * 0.6,
+        vx: rand(2, 7),
+        vy: rand(8, 13),
+        life: rand(5, 7),
+        size: rand(0.08, 0.11),
+        alpha: 0.95,
+        look: Math.floor(rand(0, LEAF_COUNT)),
+        // 地面に着いたら、少しのあいだ止まってから消える
+        floorY: floor,
+        onLand: (p) => skyFx.add({ ...p, vx: 0, vy: 0, age: 0, life: 1.6, floorY: undefined, onLand: undefined, rot: p.rot, kind: 'leaf' }),
+      });
+    }
+  }
+}
+
 function emitVillage(dt: number, t: number, forgeBusy: boolean): void {
   // 小屋の煙突の煙（いつも少し出ている。風で右へ流れる）
   for (let i = EMIT.chimney.count(dt); i > 0; i--) smoke(skyFx, 1018, 511);
@@ -801,7 +819,7 @@ function emitRoom(area: AreaId, dt: number, forgeBusy: boolean): void {
   }
 }
 
-function updateFx(area: AreaId, t: number, forgeBusy: boolean): void {
+function updateFx(area: AreaId, t: number, forgeBusy: boolean, cam: Camera): void {
   let dt = lastT < 0 ? 0 : t - lastT;
   // 止まっていた後（タブを離れていた等）に、一度に大量に出さない。重いときは1フレーム最大 0.1 秒ずつ進める
   if (dt < 0 || dt > 2) dt = 0.016;
@@ -811,8 +829,10 @@ function updateFx(area: AreaId, t: number, forgeBusy: boolean): void {
     for (const ps of [groundFx, fountainFx, skyFx, roomFx]) ps.clear();
     lastArea = area;
   }
-  if (area === 'village') emitVillage(dt, t, forgeBusy);
-  else emitRoom(area, dt, forgeBusy);
+  if (area === 'village') {
+    emitVillage(dt, t, forgeBusy);
+    emitLeaves(dt, cam);
+  } else emitRoom(area, dt, forgeBusy);
   for (const ps of [groundFx, fountainFx, skyFx, roomFx]) ps.update(dt);
 }
 
@@ -848,6 +868,9 @@ function drawWater(ctx: Ctx, t: number, cam: Camera): void {
 
 type Drawable = { y: number; x: number; draw: (ctx: Ctx) => void };
 
+/** 仲間の前のフレームの位置（動いているかを見る） */
+const lastPos: Partial<Record<'moku' | 'momo', { x: number; y: number }>> = {};
+
 function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean, t: number): Drawable {
   // 飛べる2匹なので、起きているときはふわふわ浮く
   const float = asleep ? 0 : Math.sin(t * 4 + (kind === 'moku' ? 0 : 2)) * 2 - (kind === 'momo' ? 12 : 3);
@@ -856,10 +879,22 @@ function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean,
     x: c.x,
     draw: (ctx) => {
       drawShadow(ctx, c.x, c.y, asleep ? 26 : 20);
-      const frames = kind === 'moku' ? MOKU : MOMO;
-      let def = asleep ? frames.sleep : frames.idle;
-      if (!asleep && Math.floor(t * (kind === 'momo' ? 8 : 3)) % (kind === 'momo' ? 2 : 4) === 0) def = kind === 'moku' ? MOKU.hop : MOMO.flap;
-      drawAtFeet(ctx, def, c.x, c.y + float + 1, c.dir === 'left');
+      // Ronnie の素材の絵（向き4つ×羽ばたき）。ももっちゅは飛んでいるのでいつも速く羽ばたき、
+      // モクちゃんは動いているときと、ときどき羽ばたく
+      const moving = Math.hypot(c.x - (lastPos[kind]?.x ?? c.x), c.y - (lastPos[kind]?.y ?? c.y)) > 0.05;
+      lastPos[kind] = { x: c.x, y: c.y };
+      const flap = !asleep && (kind === 'momo' ? Math.floor(t * 8) % 2 === 0 : moving ? Math.floor(t * 5) % 2 === 0 : Math.floor(t * 3) % 6 === 0);
+      const pose = companionPose(kind, asleep ? 'down' : c.dir, flap);
+      const img = spriteArt(pose.name);
+      if (img) {
+        // 眠っているときは正面の絵を少しつぶし、ゆっくり呼吸させる
+        const squash = asleep ? 0.9 + Math.sin(t * 1.6) * 0.015 : 1 + Math.sin(t * 2.4 + (kind === 'moku' ? 0 : 1)) * 0.01;
+        drawArtAtFeet(ctx, img, c.x, c.y + float + 1, COMPANION_SCALE[kind], pose.mirror, squash);
+      } else {
+        const frames = kind === 'moku' ? MOKU : MOMO;
+        const def = asleep ? frames.sleep : flap ? (kind === 'moku' ? MOKU.hop : MOMO.flap) : frames.idle;
+        drawAtFeet(ctx, def, c.x, c.y + float + 1, c.dir === 'left');
+      }
       if (asleep) {
         const z = Math.floor(t * 1.5) % 3;
         ctx.globalAlpha = 0.85;
@@ -931,7 +966,7 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
   const a = areaArt(area);
   const cam = cameraFor(s);
   const forgeBusy = s.forge.queue.length > 0 || s.forge.ready > 0;
-  updateFx(area, t, forgeBusy);
+  updateFx(area, t, forgeBusy, cam);
   const inView = (co: Cutout) => co.x1 > cam.x && co.x0 < cam.x + VIEW_W && co.y1 > cam.y && co.y0 < cam.y + VIEW_H;
   ctx.save();
   ctx.translate(-cam.x, -cam.y);

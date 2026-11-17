@@ -1,0 +1,57 @@
+// Ronnie の素材（水彩の絵を切り抜いた PNG。tools/extract_sprites.py が作る）を読み込んで描く。
+// 読み込み前・失敗したときは null を返すので、呼ぶ側はドット絵で代わりに描く。
+import { Dir } from '../core/state.js';
+import { Ctx } from './gfx.js';
+
+const cache = new Map<string, HTMLImageElement>();
+
+export function art(name: string): HTMLImageElement | null {
+  let img = cache.get(name);
+  if (!img) {
+    img = new Image();
+    img.src = `assets/sprites/${name}.png`;
+    cache.set(name, img);
+  }
+  return img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+/** 足元（x, y）を基準に、k 倍で描く。mirror で左右反転 */
+export function drawArtAtFeet(ctx: Ctx, img: HTMLImageElement, x: number, y: number, k: number, mirror = false, squashY = 1): void {
+  const w = img.naturalWidth * k;
+  const h = img.naturalHeight * k * squashY;
+  ctx.save();
+  ctx.translate(x, y);
+  if (mirror) ctx.scale(-1, 1);
+  ctx.drawImage(img, -w / 2, -h, w, h);
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------- 仲間
+
+/** 絵の倍率（基準の正面の絵 150px を、モクちゃん約42・ももっちゅ約40 のワールド単位に） */
+export const COMPANION_SCALE = { moku: 0.28, momo: 0.27 } as const;
+
+/** 向きと羽ばたきから、使う絵と左右反転を決める（横向きの絵は右向き） */
+export function companionPose(kind: 'moku' | 'momo', dir: Dir, flap: boolean): { name: string; mirror: boolean } {
+  const view = dir === 'down' ? 'front' : dir === 'up' ? 'back' : 'side';
+  return { name: `${kind}-${view}${flap ? '-flap' : ''}`, mirror: dir === 'left' };
+}
+
+// ---------------------------------------------------------------- 牛
+
+/** 牛の絵の倍率（白ウシの正面 200px を約76 に＝主人公より少し大きく。黒ウシは同じ倍率で、少しだけ大きく見える） */
+export const COW_SCALE = 0.38;
+
+/**
+ * 牛の向きと歩きのコマから、使う絵を決める。
+ * 左右の絵は別々（left は左向き、right と walk は右向き）。左へ歩くときの walk は反転して使う
+ */
+export function cowPose(color: 'white' | 'black', dir: Dir, step: boolean): { name: string; mirror: boolean } {
+  if (dir === 'down') return { name: `cow-${color}-front`, mirror: false };
+  if (dir === 'up') return { name: `cow-${color}-back`, mirror: false };
+  if (dir === 'right') return { name: `cow-${color}-${step ? 'walk' : 'right'}`, mirror: false };
+  return step ? { name: `cow-${color}-walk`, mirror: true } : { name: `cow-${color}-left`, mirror: false };
+}
+
+/** 葉っぱの絵の数（leaf-0.png 〜） */
+export const LEAF_COUNT = 17;

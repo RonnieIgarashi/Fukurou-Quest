@@ -14,8 +14,12 @@
 
 | ファイル名 | 中身 |
 |---|---|
-| `cow-white-a.png`・`cow-white-b.png` | 牧場の白ウシ（村の絵から切り抜いたもの） |
-| `cow-black.png` | 荒野の黒ウシ（同上。ゲームでは 0.62 倍で表示） |
+| `moku-{front,back,side}[-flap].png` | モクちゃん（正面・後ろ・横（右向き）、それぞれ羽ばたき） |
+| `momo-{front,back,side}[-flap].png` | ももっちゅ（同上） |
+| `cow-{white,black}-{front,back,left,right,walk}.png` | 白ウシ・黒ウシ（left は左向き、right と walk は右向き） |
+| `leaf-0.png`〜`leaf-16.png` | 木から落ちる葉っぱ |
+
+どれも `tools/extract_sprites.py` が、Ronnie の素材の一覧絵（`docs/concept/sprites_moku_momo_leaves.jpg`・`cows_white_black.jpg`）から切り出す（白い紙を抜いて透明に）。絵が無いときは、仲間はドット絵で代わりに描く。
 
 煙・水しぶき・もや・火の粉は絵を使わず、`src/view/particles.ts` が粒（パーティクル）で描きます。
 

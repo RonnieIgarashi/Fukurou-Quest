@@ -282,7 +282,7 @@ def main():
         body = largest(~grass & region)
         body = ndimage.binary_fill_holes(ndimage.binary_closing(body, iterations=2)) & region
         rgba, _ = rgba_crop(src, body)
-        save_sprite(rgba, name)
+        pass  # 牛の絵は tools/extract_sprites.py が素材の一覧絵から作る（2026-11-17）
         # 影（草より暗い所のうち、体につながっている所）
         near = dilate(body, 16) & pen_box
         dark = near & (lum(src) < med - 12)
@@ -355,7 +355,7 @@ def main():
     allow = ndimage.binary_erosion(ground & ~lines, iterations=3) & ~box_mask(1860, 915, 1955, 1000) & ~box_mask(1880, 1090, 2000, 1170)
     out = wash_fill(out, hole, allow, seed=3)
     rgba, _ = rgba_crop(src, body)
-    save_sprite(rgba, 'cow-black.png')
+    pass  # 同上
 
     Image.fromarray(np.clip(out, 0, 255).astype(np.uint8)).save(OUT, quality=92)
     print('saved', OUT)
