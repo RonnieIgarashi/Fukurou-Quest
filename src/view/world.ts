@@ -32,6 +32,8 @@ interface Cutout {
   y1: number;
   baseY: number;
   sway?: Sway;
+  /** 横の位置ごとの物の下端（outline の物だけ）。base[x - x0] */
+  base?: Float32Array;
 }
 
 const art = new Map<AreaId, { img: HTMLImageElement; ready: boolean; cutouts: Cutout[]; sways: Cutout[] }>();
@@ -156,7 +158,20 @@ function clearColors(ctx: Ctx, w: number, h: number, clear: Clear[], inside: boo
 }
 
 /** 輪郭を少しぼかして切り抜く（人物との境目が目立たないように） */
-function cutout(img: HTMLImageElement, o: Pick<Occluder, 'poly' | 'baseY' | 'holes' | 'clear' | 'clearInside'>, sway?: Sway): Cutout {
+/** 切り抜きの各列で、いちばん下の不透明な所の y（物が地面に接している所） */
+function columnBase(ctx: Ctx, w: number, h: number, y0: number): Float32Array {
+  const a = ctx.getImageData(0, 0, w, h).data;
+  const base = new Float32Array(w).fill(-Infinity);
+  for (let x = 0; x < w; x++)
+    for (let y = h - 1; y >= 0; y--)
+      if (a[(y * w + x) * 4 + 3] > 128) {
+        base[x] = y0 + y;
+        break;
+      }
+  return base;
+}
+
+function cutout(img: HTMLImageElement, o: Pick<Occluder, 'poly' | 'baseY' | 'holes' | 'clear' | 'clearInside' | 'outline'>, sway?: Sway): Cutout {
   const b = bounds(o.poly);
   const w = b.x1 - b.x0;
   const h = b.y1 - b.y0;
@@ -180,7 +195,19 @@ function cutout(img: HTMLImageElement, o: Pick<Occluder, 'poly' | 'baseY' | 'hol
   ctx.filter = o.holes?.length ? 'blur(0.8px)' : 'blur(1.5px)';
   ctx.drawImage(mask, 0, 0);
   ctx.filter = 'none';
-  return { img: c, ...b, baseY: o.baseY, sway };
+  return { img: c, ...b, baseY: o.baseY, sway, base: o.outline ? columnBase(ctx, w, h, b.y0) : undefined };
+}
+
+/** 人物（足元 x, y）が、この物の奥にいるか */
+function isBehind(co: Cutout, x: number, y: number): boolean {
+  if (!co.base) return y < co.baseY;
+  // 体の幅の範囲で、いちばん手前（下）にある物の下端より奥なら、奥にいる
+  let by = -Infinity;
+  for (let dx = -6; dx <= 6; dx++) {
+    const i = Math.round(x + dx) - co.x0;
+    if (i >= 0 && i < co.base.length) by = Math.max(by, co.base[i]);
+  }
+  return y < by;
 }
 
 function areaArt(area: AreaId) {
@@ -947,16 +974,21 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
     },
   });
 
-  // 手前に来る絵（建物・木・噴水）。奥にいる人物が境目に近いほど薄くして、切り替わりをなめらかにする
+  // 手前に来る絵（建物・木・岩・看板など）。奥に人物がいるときだけ、その人物の上に重ねて描く。
+  // 揺れる木だけは、奥にいる人物が境目に近いほど薄くして切り替わりをなめらかにする（ほかの物は、
+  // 薄くすると人が透けて見えてしまうので薄くしない。2026-11-17 Ronnie 指示）
   const chars = items.slice();
   for (const co of a?.cutouts ?? []) {
     let alpha = 1;
+    let deepest = -Infinity;
     for (const ch of chars) {
-      if (ch.x < co.x0 - 16 || ch.x > co.x1 + 16 || ch.y >= co.baseY) continue;
-      alpha = Math.min(alpha, Math.min(1, (co.baseY - ch.y) / 14));
+      if (ch.x < co.x0 - 16 || ch.x > co.x1 + 16 || !isBehind(co, ch.x, ch.y)) continue;
+      deepest = Math.max(deepest, ch.y);
+      if (co.sway) alpha = Math.min(alpha, Math.min(1, (co.baseY - ch.y) / 14));
     }
+    if (deepest === -Infinity) continue; // 奥に誰もいなければ、背景の絵のままでよい
     items.push({
-      y: co.baseY,
+      y: co.base ? deepest + 0.001 : co.baseY,
       x: (co.x0 + co.x1) / 2,
       draw: (g) => {
         g.globalAlpha = alpha;
