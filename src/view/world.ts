@@ -1,7 +1,7 @@
 // フィールドの描画：背景の絵 → 水の動き・畑 → 物と人物（足元の y で前後を決める。絵の建物や木は切り抜きを手前に重ねる）
 // → 時刻の光 → 周辺減光。座標はエリアの絵の px（ワールド単位）。画面には 800x450 の範囲を映す。
 import { hourFloat } from '../core/clock.js';
-import { AreaId, AREAS, inPoly, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
+import { AreaId, AREAS, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
 import { CROPS, CropId } from '../core/params.js';
 import { mokuAsleep, momoAsleep } from '../core/sim.js';
 import { Companion, GameState, Plot } from '../core/state.js';
@@ -98,25 +98,89 @@ function ellipsePoly(s: Sway): Poly {
   ]);
 }
 
+/** 背景の色の見分け（切り抜きから抜く所） */
+const CLEAR_TEST: Record<Clear, (r: number, g: number, b: number) => boolean> = {
+  grass: (r, g, b) => g > r * 0.95 && g > b * 1.15 && g > 80,
+  sand: (r, g, b) => r > 185 && g > 160 && b > 110 && r - b > 35 && r >= g,
+  water: (r, _g, b) => b > r + 40,
+};
+
+/** 切り抜きの中の背景の色の所を抜く。水は半透明に（噴水の水越しに後ろが見える） */
+function clearColors(ctx: Ctx, w: number, h: number, clear: Clear[], inside: boolean): void {
+  const data = ctx.getImageData(0, 0, w, h);
+  const px = data.data;
+  const solid = clear.filter((c) => c !== 'water');
+  const hit = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const [r, g, b] = [px[i * 4], px[i * 4 + 1], px[i * 4 + 2]];
+    if (solid.some((c) => CLEAR_TEST[c](r, g, b))) hit[i] = 1;
+    else if (clear.includes('water') && CLEAR_TEST.water(r, g, b)) hit[i] = 2;
+  }
+  if (!inside) {
+    // 外側から続いている背景の色だけを抜く（屋根や岩の中の、たまたま似た色の所は残す）
+    const keep = new Uint8Array(w * h);
+    const stack: number[] = [];
+    for (let x = 0; x < w; x++) stack.push(x, (h - 1) * w + x);
+    for (let y = 0; y < h; y++) stack.push(y * w, y * w + w - 1);
+    while (stack.length) {
+      const i = stack.pop()!;
+      if (keep[i] || hit[i] !== 1) continue;
+      keep[i] = 1;
+      const x = i % w;
+      if (x > 0) stack.push(i - 1);
+      if (x < w - 1) stack.push(i + 1);
+      if (i >= w) stack.push(i - w);
+      if (i < (h - 1) * w) stack.push(i + w);
+    }
+    for (let i = 0; i < w * h; i++) if (hit[i] === 1 && !keep[i]) hit[i] = 0;
+  }
+  // まわり9マスの多数決で、ぽつぽつした抜け・残りをならす
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let n = 0;
+      let wat = 0;
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = Math.min(w - 1, Math.max(0, x + dx));
+          const yy = Math.min(h - 1, Math.max(0, y + dy));
+          const v = hit[yy * w + xx];
+          if (v === 1) n++;
+          else if (v === 2) wat++;
+        }
+      const i = (y * w + x) * 4 + 3;
+      if (n >= 5) px[i] = 0;
+      else if (n >= 3) px[i] = Math.round(px[i] * 0.5);
+      else if (wat >= 5) px[i] = Math.round(px[i] * 0.5);
+    }
+  ctx.putImageData(data, 0, 0);
+}
+
 /** 輪郭を少しぼかして切り抜く（人物との境目が目立たないように） */
-function cutout(img: HTMLImageElement, poly: Poly, baseY: number, sway?: Sway): Cutout {
-  const b = bounds(poly);
+function cutout(img: HTMLImageElement, o: Pick<Occluder, 'poly' | 'baseY' | 'holes' | 'clear' | 'clearInside'>, sway?: Sway): Cutout {
+  const b = bounds(o.poly);
   const w = b.x1 - b.x0;
   const h = b.y1 - b.y0;
   const [mask, m] = makeCanvas(w, h);
-  m.beginPath();
-  poly.forEach(([x, y], i) => (i ? m.lineTo(x - b.x0, y - b.y0) : m.moveTo(x - b.x0, y - b.y0)));
-  m.closePath();
+  const path = (poly: Poly) => {
+    m.beginPath();
+    poly.forEach(([x, y], i) => (i ? m.lineTo(x - b.x0, y - b.y0) : m.moveTo(x - b.x0, y - b.y0)));
+    m.closePath();
+    m.fill();
+  };
   m.fillStyle = '#000';
-  m.fill();
+  path(o.poly);
+  // 欄干のすき間などは抜く
+  m.globalCompositeOperation = 'destination-out';
+  for (const hole of o.holes ?? []) path(hole);
   const [c, ctx] = makeCanvas(w, h);
   ctx.imageSmoothingEnabled = true;
   ctx.drawImage(img, -b.x0, -b.y0);
+  if (o.clear?.length) clearColors(ctx, w, h, o.clear, !!o.clearInside);
   ctx.globalCompositeOperation = 'destination-in';
-  ctx.filter = 'blur(1.5px)';
+  ctx.filter = o.holes?.length ? 'blur(0.8px)' : 'blur(1.5px)';
   ctx.drawImage(mask, 0, 0);
   ctx.filter = 'none';
-  return { img: c, ...b, baseY, sway };
+  return { img: c, ...b, baseY: o.baseY, sway };
 }
 
 function areaArt(area: AreaId) {
@@ -127,8 +191,8 @@ function areaArt(area: AreaId) {
     const entry = { img, ready: false, cutouts: [] as Cutout[], sways: [] as Cutout[] };
     img.onload = () => {
       entry.ready = true;
-      entry.cutouts = AREAS[area].occluders.map((o) => cutout(img, o.poly, o.baseY, o.sway ? SWAYS[o.sway] : undefined));
-      if (area === 'village') entry.sways = Object.values(SWAYS).map((s) => cutout(img, ellipsePoly(s), 0, s));
+      entry.cutouts = AREAS[area].occluders.map((o) => cutout(img, o, o.sway ? SWAYS[o.sway] : undefined));
+      if (area === 'village') entry.sways = Object.values(SWAYS).map((s) => cutout(img, { poly: ellipsePoly(s), baseY: 0 }, s));
     };
     img.src = src;
     art.set(area, entry);

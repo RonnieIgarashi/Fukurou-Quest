@@ -112,7 +112,9 @@ export class Screen {
     this.images.push({ img, x, y, w, h });
   }
 
+  /** 画面に出る幅（ひらがなモードでは、ひらがなにした文の幅） */
   textWidth(text: string, size = 11): number {
+    if (this.kana) text = toKana(text);
     this.measure.font = `${size * 4}px ${FONT}`;
     return this.measure.measureText(text).width / 4;
   }

@@ -31,7 +31,7 @@ export const STORY: Record<StoryId, Line[]> = {
   ],
   momoArrives: [
     { speaker: 'momo', text: 'モクちゃーん！ やっと見つけた！' },
-    { speaker: 'moku', text: 'ももっちゅりん！？ どうしてここに？' },
+    { speaker: 'moku', text: 'ももっちゅ！？ どうしてここに？' },
     { speaker: 'momo', text: '忘れ物を届けにきたの。……って、ここに住んでるの？' },
     { speaker: 'moku', text: 'うん！ {name}といっしょに。' },
     { speaker: 'momo', text: 'じゃあ、わたしもここに住んじゃおう。夜のお仕事なら任せて！ ……朝は、ちょっと苦手だけど。' },

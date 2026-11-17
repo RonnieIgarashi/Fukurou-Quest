@@ -1,6 +1,6 @@
 // キャラクターのドット絵。形（体・頭・脚など）を塗ってから、輪郭線を自動で付ける。
 // DOM に依存しないので、テストで大きさや色の抜けを確かめられる。
-// モクちゃん・ももっちゅりんは docs/concept/moku-momo.jpg（Ronnie のイメージ絵）に合わせて描いた。
+// モクちゃん・ももっちゅは docs/concept/moku-momo.jpg（Ronnie のイメージ絵）に合わせて描いた。
 
 export const PALETTE: Record<string, string> = {
   k: '#3d3029', // 輪郭（背景の絵の墨線に合わせた焦げ茶）
@@ -34,7 +34,7 @@ export const PALETTE: Record<string, string> = {
   y: '#dcb874', // くちばし
   Y: '#a47c3c',
   f: '#c9584a', // 脚
-  // ももっちゅりん（灰色のネズミ、青い羽、先がハートのしっぽ）
+  // ももっちゅ（灰色のネズミ、青い羽、先がハートのしっぽ）
   q: '#b1b0b8',
   Q: '#85848f',
   h: '#d8d6dc',
@@ -211,7 +211,7 @@ function moku(frame: 'idle' | 'hop' | 'sleep'): SpriteDef {
 
 export const MOKU = { idle: moku('idle'), hop: moku('hop'), sleep: moku('sleep') };
 
-// ---------------------------------------------------------------- ももっちゅりん（32x32）
+// ---------------------------------------------------------------- ももっちゅ（32x32）
 // 灰色のネズミに青い羽。しっぽの先はハート
 
 function momo(frame: 'idle' | 'flap' | 'sleep'): SpriteDef {

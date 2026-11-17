@@ -118,7 +118,7 @@ function hut(ctx: Ctx): void {
   // モクちゃんの止まり木
   wobblyRect(ctx, 556, 194, 6, 46, '#7a5434', r);
   wobblyRect(ctx, 540, 192, 38, 6, '#8a6040', r);
-  // ももっちゅりんのかご
+  // ももっちゅのかご
   wobblyRect(ctx, 226, 352, 50, 26, '#c8a070', r);
   wobblyRect(ctx, 232, 348, 38, 8, '#e9c9c0', r);
 }

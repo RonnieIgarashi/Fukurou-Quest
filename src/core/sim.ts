@@ -18,7 +18,7 @@ export function mokuAsleep(t: number): boolean {
   return m >= TIME.NIGHT || m < TIME.MORNING;
 }
 
-/** ももっちゅりんは夜も働けるが朝に弱い【確定】。眠る時間帯は【仮】 */
+/** ももっちゅは夜も働けるが朝に弱い【確定】。眠る時間帯は【仮】 */
 export function momoAsleep(t: number): boolean {
   const m = minuteOfDay(t);
   return m >= MOMO_SLEEP.from && m < MOMO_SLEEP.to;
@@ -106,6 +106,8 @@ export function advance(s: GameState, minutes: number): GameEvent[] {
 
 /** 眠って次の朝 6:00 まで進め、小屋の中（ベッドの横）で目覚めさせる */
 export function sleepUntilMorning(s: GameState): GameEvent[] {
+  // 22時前に自分から寝たときは、寝ている間に「眠くなっちゃった」の場面を出さない（起きた直後に出てしまうため）
+  s.flags['story.firstNight'] = true;
   const events = advance(s, nextMorning(s.clock) - s.clock);
   s.player.area = WAKE.area;
   s.player.x = WAKE.x;

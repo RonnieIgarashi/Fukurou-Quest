@@ -65,7 +65,9 @@ function toggleKana(): void {
   } catch {
     /* 保存できなくても、この場では切り替わる */
   }
-  toast(screen.kana ? 'ひらがなで表示します。' : '漢字で表示します。');
+  // すばやく切り替えたとき、前の知らせが残って混乱しないよう、前の知らせは消してから出す
+  toasts = toasts.filter((m) => m.key !== 'kana');
+  toast(screen.kana ? 'ひらがなで表示します。' : '漢字で表示します。', 'kana');
 }
 const kanaLabel = () => (screen.kana ? 'もじ：ひらがな' : 'もじ：かんじ');
 const titleBg: GameState = createGame('');
@@ -270,6 +272,10 @@ const anim: PlayerAnim = { moving: false, walked: 0 };
 type Beat = { kind: 'line'; line: Line } | { kind: 'movie'; id: string };
 let beats: Beat[] = [];
 let lineShown = 0;
+/** 長い文の何ページ目か */
+let linePage = 0;
+/** 会話を下キーで閉じたあと、下キーを離すまで歩き出さない */
+let holdAfterDialog = false;
 
 type Menu =
   | { kind: 'task'; spot: Spot; options: TaskOption[]; idx: number }
@@ -280,11 +286,11 @@ let menu: Menu | null = null;
 
 let busy: { from: number; to: number; t0: number; dur: number; sleep: boolean; after: () => void } | null = null;
 let movie: { id: string; t0: number; real: boolean } | null = null;
-let toasts: { text: string; t0: number }[] = [];
+let toasts: { text: string; t0: number; key?: string }[] = [];
 let saveRequested = false;
 
-function toast(text: string): void {
-  toasts.push({ text, t0: t });
+function toast(text: string, key?: string): void {
+  toasts.push({ text, t0: t, key });
   if (toasts.length > 3) toasts.shift();
 }
 
@@ -324,6 +330,8 @@ async function saveNow(): Promise<void> {
 function resetField(): void {
   acc = 0;
   beats = [];
+  linePage = 0;
+  lineShown = 0;
   menu = null;
   busy = null;
   movie = null;
@@ -390,9 +398,36 @@ function movePlayer(dt: number): void {
   const vy = (dy / len) * sp * dt;
   const before = { x: p.x, y: p.y };
   if (!blockedAt(p.x + vx, p.y)) p.x += vx;
+  else if (vx !== 0 && vy === 0) {
+    // 横に進めないときは、少し上か下にずらして進む（反り橋の床・斜めの縁に沿って歩けるように）
+    const s = Math.abs(vx);
+    for (const dyTry of [s * 0.6, -s * 0.6, s * 1.2, -s * 1.2]) {
+      if (!blockedAt(p.x + vx, p.y + dyTry)) {
+        p.x += vx;
+        p.y += dyTry;
+        break;
+      }
+    }
+  }
   if (!blockedAt(p.x, p.y + vy)) p.y += vy;
   p.x = Math.max(8, Math.min(AREAS[p.area].w - 8, p.x));
   anim.walked += Math.hypot(p.x - before.x, p.y - before.y);
+  autoDoor(dx, dy);
+}
+
+/**
+ * 建物の入口・出口に歩いて入ったら、Z を押さなくても出入りする（2026-11-17 Ronnie 指示）。
+ * 入口は上へ、出口は下へ歩いて踏んだときだけ（向きを変えただけでは出入りしない）。
+ */
+function autoDoor(dx: number, dy: number): void {
+  const p = game.player;
+  const s = spotAt(p.area, p.x, p.y - 3);
+  if (!s) return;
+  if (s.kind === 'enter' && dy < 0) moveTo(s.id as AreaId, ENTRANCES[s.id as AreaId], 'up');
+  else if (s.kind === 'exit' && dy > 0) {
+    const from = p.area as Exclude<AreaId, 'village'>;
+    moveTo('village', EXIT_TO_VILLAGE[from], 'down');
+  }
 }
 
 /**
@@ -551,7 +586,10 @@ function updateField(dt: number): void {
   }
   if (menu) return updateMenu();
 
-  movePlayer(dt);
+  // 会話を下キーで閉じた直後は、下キーを離すまで歩き出さない
+  if (holdAfterDialog && !isHeld('down')) holdAfterDialog = false;
+  if (!holdAfterDialog) movePlayer(dt);
+  else anim.moving = false;
   moveCompanions(dt);
   updateCows(dt);
   if (wasPressed('ok')) interact();
@@ -577,15 +615,38 @@ function updateDialog(dt: number): void {
     startMovie(b.id);
     return;
   }
-  const len = [...b.line.text].length;
+  const pages = dialogPages(b.line);
+  const len = [...pages[Math.min(linePage, pages.length - 1)].join('')].length;
   lineShown = Math.min(len, lineShown + dt * 40);
-  if (wasPressed('ok', 'cancel')) {
+  // 下キー（または Z・X）で、文を最後まで出す → 次のページ → 閉じる（2026-11-17 Ronnie 指示）
+  if (wasPressed('ok', 'cancel', 'down')) {
     if (lineShown < len) lineShown = len;
-    else {
-      beats.shift();
+    else if (linePage < pages.length - 1) {
+      linePage++;
       lineShown = 0;
+    } else {
+      beats.shift();
+      linePage = 0;
+      lineShown = 0;
+      if (wasPressed('down')) holdAfterDialog = true;
     }
   }
+}
+
+/** 会話枠の配置（話し手がいるときは左に顔） */
+function dialogLayout(line: Line): { tx: number; tw: number; name: string; rows: number } {
+  const hasFace = line.speaker !== 'narration';
+  const name = SPEAKER_NAMES[line.speaker]();
+  return { tx: hasFace ? 74 : 8, tw: hasFace ? 302 : 368, name, rows: name ? 3 : 4 };
+}
+
+/** 枠に入りきらない長い文は、ページに分けて下キーで送る */
+function dialogPages(line: Line): string[][] {
+  const { tw, rows } = dialogLayout(line);
+  const lines = screen.wrap(line.text, tw - 20, 11);
+  const pages: string[][] = [];
+  for (let i = 0; i < lines.length; i += rows) pages.push(lines.slice(i, i + rows));
+  return pages.length ? pages : [['']];
 }
 
 function startMovie(id: string): void {
@@ -735,7 +796,7 @@ const SPEAKER_NAMES: Record<Speaker, () => string> = {
   narration: () => '',
   player: () => game.playerName,
   moku: () => 'モクちゃん',
-  momo: () => 'ももっちゅりん',
+  momo: () => 'ももっちゅ',
 };
 
 const FALLBACK_FACE: Record<Exclude<Speaker, 'narration'>, SpriteDef> = {
@@ -747,8 +808,7 @@ const FALLBACK_FACE: Record<Exclude<Speaker, 'narration'>, SpriteDef> = {
 function drawDialog(ctx: Ctx, line: Line): void {
   // 話し手がいるときは、レジェンドオブマナのように文の左に顔を出す
   const hasFace = line.speaker !== 'narration';
-  const tx = hasFace ? 74 : 8;
-  const tw = hasFace ? 302 : 368;
+  const { tx, tw, name } = dialogLayout(line);
   if (hasFace) {
     drawFrame(ctx, 8, 146, 64, 64, 0.92);
     const img = portrait(line.speaker);
@@ -763,14 +823,22 @@ function drawDialog(ctx: Ctx, line: Line): void {
   }
   drawFrame(ctx, tx, 146, tw, 64, 0.92);
   let y = 151;
-  const name = SPEAKER_NAMES[line.speaker]();
   if (name) {
     screen.text(tx + 10, y, name, { size: 10, color: '#ffe066' });
     y += 13;
   }
-  const shown = [...line.text].slice(0, Math.floor(lineShown)).join('');
-  screen.wrap(shown, tw - 20, 11).slice(0, name ? 3 : 4).forEach((l, i) => screen.text(tx + 10, y + i * 13, l, { size: 11 }));
-  if (Math.floor(lineShown) >= [...line.text].length && Math.floor(t * 2) % 2 === 0) {
+  const pages = dialogPages(line);
+  const page = pages[Math.min(linePage, pages.length - 1)];
+  // 今のページの文を、1文字ずつ出す（行の区切りはページを作ったときのまま）
+  let left = Math.floor(lineShown);
+  page.forEach((l, i) => {
+    const chars = [...l];
+    const part = chars.slice(0, Math.max(0, left)).join('');
+    left -= chars.length;
+    if (part) screen.text(tx + 10, y + i * 13, part, { size: 11 });
+  });
+  const pageLen = [...page.join('')].length;
+  if (Math.floor(lineShown) >= pageLen && Math.floor(t * 2) % 2 === 0) {
     const ax = tx + tw - 12;
     ctx.fillStyle = '#ffe066';
     ctx.fillRect(ax, 202, 5, 1);
@@ -829,7 +897,7 @@ function drawMenu(ctx: Ctx): void {
     drawFrame(ctx, 40, 46, 230, 84);
     screen.text(52, 52, 'なかま', { size: 11, color: '#ffe066' });
     const list: [string, SpriteDef, boolean, string][] = [['モクちゃん', MOKU.idle, mokuAsleep(game.clock), '夜になると眠くなる。']];
-    if (game.companions.momo.met) list.push(['ももっちゅりん', MOMO.idle, momoAsleep(game.clock), '夜でも働けるが、朝に弱い。']);
+    if (game.companions.momo.met) list.push(['ももっちゅ', MOMO.idle, momoAsleep(game.clock), '夜でも働けるが、朝に弱い。']);
     list.forEach(([name, def, asleep, note], i) => {
       const y = 70 + i * 28;
       ctx.drawImage(spriteImage(def), 50, y - 2, 20, 20);
@@ -873,7 +941,7 @@ function drawField(ctx: Ctx): void {
     const cx = Math.round((game.player.x - cam.x) * k);
     const cy = Math.round((game.player.y - cam.y - 66) * k);
     drawFrame(ctx, cx - 10, cy - 12, 20, 12, 0.85);
-    screen.text(cx, cy - 11, 'Z', { size: 9, align: 'center', color: '#ffe066' });
+    screen.text(cx, cy - 11, '！', { size: 9, align: 'center', color: '#ffe066' });
   }
 
   if (busy) {

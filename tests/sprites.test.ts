@@ -14,7 +14,7 @@ function check(name: string, def: SpriteDef): void {
 test('ドット絵はすべて四角く、パレットにある色だけを使う', () => {
   for (const [face, frames] of Object.entries(PLAYER)) frames.forEach((f, i) => check(`主人公 ${face}${i}`, f));
   for (const [k, f] of Object.entries(MOKU)) check(`モクちゃん ${k}`, f);
-  for (const [k, f] of Object.entries(MOMO)) check(`ももっちゅりん ${k}`, f);
+  for (const [k, f] of Object.entries(MOMO)) check(`ももっちゅ ${k}`, f);
   check('ZZZ', ZZZ);
 });
 

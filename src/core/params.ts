@@ -68,10 +68,10 @@ export const START_INVENTORY = {
   goods: { wood: 6, meat: 0, hide: 0, hair: 0, bone: 0 },
 } as const;
 
-/** 【仮】ももっちゅりんが村にやってくる日時 */
+/** 【仮】ももっちゅが村にやってくる日時 */
 export const MOMO_ARRIVAL = { day: 3, minute: 9 * MINUTES_PER_HOUR } as const;
 
-/** 【仮】ももっちゅりんは朝に弱い。この時刻のあいだは眠っている */
+/** 【仮】ももっちゅは朝に弱い。この時刻のあいだは眠っている */
 export const MOMO_SLEEP = { from: 3 * MINUTES_PER_HOUR, to: 9 * MINUTES_PER_HOUR } as const;
 
 /** 【確定】主人公の名前はカタカナ6文字まで */

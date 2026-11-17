@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayOf, formatClock, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
-import { AREAS, HOME, isBlockedAt, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
+import { AREAS, bridgeDeck, HOME, isBlockedAt, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from '../src/core/names.js';
 import { CROPS, FORGE, MINUTES_PER_DAY, TIME } from '../src/core/params.js';
 import { LocalSaveStore, MemoryKeyValue } from '../src/core/save/localStore.js';
@@ -124,7 +124,7 @@ test('炉には燃料が要り、薪→毛→皮の順に使う', () => {
 
 // ---------------------------------------------------------------- 仲間・イベント
 
-test('モクちゃんは夜に眠り、ももっちゅりんは朝に眠る', () => {
+test('モクちゃんは夜に眠り、ももっちゅは朝に眠る', () => {
   assert.equal(mokuAsleep(at(1, 21)), false);
   assert.equal(mokuAsleep(at(1, 23)), true);
   assert.equal(momoAsleep(at(2, 7)), true);
@@ -158,6 +158,13 @@ test('寝られるのは 18:00 以降', () => {
   assert.ok(optionsFor(g, door).find((o) => o.id === 'sleep')!.disabled);
   advance(g, at(1, 18) - g.clock);
   assert.equal(optionsFor(g, door).find((o) => o.id === 'sleep')!.disabled, null);
+});
+
+test('22時前に自分から寝たときは、起きた後に「眠くなっちゃった」の場面が出ない', () => {
+  const g = createGame('テスト');
+  advance(g, at(1, 20) - g.clock);
+  const events = sleepUntilMorning(g);
+  assert.ok(!events.some((e) => e.kind === 'story' && e.id === 'firstNight'));
 });
 
 test('100日目の朝にドラゴン来訪のイベント', () => {
@@ -218,6 +225,27 @@ test('村：小屋の前・畑の中・浜辺・慰霊碑の前は歩け、川�
   assert.equal(v(1000, 400), true); // 森
   assert.equal(v(1250, 790), true); // 畑の前の柵
   assert.equal(v(700, 1230), true); // 石垣
+});
+
+test('村：反り橋は床の線に沿って歩け、手前の欄干の上には乗れない', () => {
+  const v = (x: number, y: number) => isBlockedAt('village', x, y);
+  for (const x of [150, 200, 255, 300, 360]) {
+    assert.equal(v(x, bridgeDeck(x) + 3), false, `橋の床 x=${x}`);
+    assert.equal(v(x, bridgeDeck(x) + 22), true, `手前の欄干 x=${x}`);
+  }
+});
+
+test('村：石垣の奥・岩の奥まで回り込め、荒野の立て札の上の木には入れない', () => {
+  const v = (x: number, y: number) => isBlockedAt('village', x, y);
+  assert.equal(v(620, 1196), false); // 西の石垣の奥
+  assert.equal(v(1300, 1188), false); // 東の石垣の奥
+  assert.equal(v(1240, 1028), false); // 広場の南東の岩の奥
+  assert.equal(v(708, 1132), false); // 石垣の手前の岩の奥
+  assert.equal(v(1240, 1046), true); // 岩の根元
+  assert.equal(v(1640, 700), true); // 立て札の上の木
+  assert.equal(v(1650, 760), false); // 立て札の奥
+  assert.equal(v(1578, 1130), false); // 鍛冶小屋の入口の前
+  assert.equal(v(1560, 1060), true); // 鍛冶小屋の中
 });
 
 // ---------------------------------------------------------------- 名前
