@@ -26,7 +26,52 @@ export function drawArtAtFeet(ctx: Ctx, img: HTMLImageElement, x: number, y: num
   ctx.restore();
 }
 
+/** 絵の重心（不透明な所の平均の位置、px）。羽ばたきの絵どうしで体の位置をそろえるのに使う */
+const centroids = new Map<string, { x: number; y: number }>();
+
+export function centroidOf(name: string, img: HTMLImageElement): { x: number; y: number } {
+  let c = centroids.get(name);
+  if (c) return c;
+  const cv = document.createElement('canvas');
+  cv.width = img.naturalWidth;
+  cv.height = img.naturalHeight;
+  const g = cv.getContext('2d')!;
+  g.drawImage(img, 0, 0);
+  const d = g.getImageData(0, 0, cv.width, cv.height).data;
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let y = 0; y < cv.height; y++)
+    for (let x = 0; x < cv.width; x++)
+      if (d[(y * cv.width + x) * 4 + 3] > 128) {
+        sx += x;
+        sy += y;
+        n++;
+      }
+  c = n ? { x: sx / n, y: sy / n } : { x: cv.width / 2, y: cv.height / 2 };
+  centroids.set(name, c);
+  return c;
+}
+
+/**
+ * 重心を (x, y) に合わせて描く（飛んでいる仲間用）。
+ * 羽を広げた絵と閉じた絵は大きさが違うので、足元でそろえると体が上下に跳ねて見える（2026-11-18 Ronnie 指摘）
+ */
+export function drawArtAtCenter(ctx: Ctx, name: string, img: HTMLImageElement, x: number, y: number, k: number, mirror = false, squashY = 1): void {
+  const c = centroidOf(name, img);
+  const w = img.naturalWidth * k;
+  const h = img.naturalHeight * k * squashY;
+  ctx.save();
+  ctx.translate(x, y);
+  if (mirror) ctx.scale(-1, 1);
+  ctx.drawImage(img, -c.x * k, -c.y * k * squashY, w, h);
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------- 仲間
+
+/** 足元から体の重心までの高さ（ワールド単位。正面の絵の値に合わせる） */
+export const COMPANION_BODY = { moku: 0.28 * 82, momo: 0.27 * 82 } as const;
 
 /** 絵の倍率（基準の正面の絵 150px を、モクちゃん約42・ももっちゅ約40 のワールド単位に） */
 export const COMPANION_SCALE = { moku: 0.28, momo: 0.27 } as const;

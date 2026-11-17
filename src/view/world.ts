@@ -7,7 +7,7 @@ import { mokuAsleep, momoAsleep } from '../core/sim.js';
 import { Companion, Dir, GameState, Plot } from '../core/state.js';
 import { Ctx, drawAtFeet, drawShadow, makeCanvas, rng, spriteImage, VIEW_H, VIEW_W } from './gfx.js';
 import { interiorImage, SMITHY_FIRE } from './interior.js';
-import { art as spriteArt, companionPose, COMPANION_SCALE, COW_SCALE, cowPose, drawArtAtFeet, LEAF_COUNT } from './art.js';
+import { art as spriteArt, companionPose, COMPANION_BODY, COMPANION_SCALE, drawArtAtCenter, COW_SCALE, cowPose, drawArtAtFeet, LEAF_COUNT } from './art.js';
 import { Emitter, Particles, rand, smoke } from './particles.js';
 import { MOKU, MOMO, PLAYER, ZZZ } from './sprites.js';
 
@@ -907,8 +907,8 @@ type Drawable = { y: number; x: number; draw: (ctx: Ctx) => void };
 const lastPos: Partial<Record<'moku' | 'momo', { x: number; y: number }>> = {};
 
 function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean, t: number): Drawable {
-  // 飛べる2匹なので、起きているときはふわふわ浮く
-  const float = asleep ? 0 : Math.sin(t * 4 + (kind === 'moku' ? 0 : 2)) * 2 - (kind === 'momo' ? 12 : 3);
+  // 飛べる2匹なので、起きているときはふわふわ浮く（ゆっくり、小さく）
+  const float = asleep ? 0 : Math.sin(t * 2.2 + (kind === 'moku' ? 0 : 2)) * 1.5 - (kind === 'momo' ? 12 : 3);
   return {
     y: c.y,
     x: c.x,
@@ -918,13 +918,16 @@ function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean,
       // モクちゃんは動いているときと、ときどき羽ばたく
       const moving = Math.hypot(c.x - (lastPos[kind]?.x ?? c.x), c.y - (lastPos[kind]?.y ?? c.y)) > 0.05;
       lastPos[kind] = { x: c.x, y: c.y };
-      const flap = !asleep && (kind === 'momo' ? Math.floor(t * 8) % 2 === 0 : moving ? Math.floor(t * 5) % 2 === 0 : Math.floor(t * 3) % 6 === 0);
+      // 羽ばたきは1秒に4回ほど（速すぎると絵が読めない）
+      const flap = !asleep && (kind === 'momo' ? Math.floor(t * 4.5) % 2 === 0 : moving ? Math.floor(t * 4) % 2 === 0 : Math.floor(t * 3) % 6 === 0);
       const pose = companionPose(kind, asleep ? 'down' : c.dir, flap);
       const img = spriteArt(pose.name);
       if (img) {
         // 眠っているときは正面の絵を少しつぶし、ゆっくり呼吸させる
         const squash = asleep ? 0.9 + Math.sin(t * 1.6) * 0.015 : 1 + Math.sin(t * 2.4 + (kind === 'moku' ? 0 : 1)) * 0.01;
-        drawArtAtFeet(ctx, img, c.x, c.y + float + 1, COMPANION_SCALE[kind], pose.mirror, squash);
+        if (asleep) drawArtAtFeet(ctx, img, c.x, c.y + 1, COMPANION_SCALE[kind], pose.mirror, squash);
+        // 起きているときは、羽ばたいても体の位置が変わらないよう重心でそろえる
+        else drawArtAtCenter(ctx, pose.name, img, c.x, c.y + float + 1 - COMPANION_BODY[kind], COMPANION_SCALE[kind], pose.mirror, squash);
       } else {
         const frames = kind === 'moku' ? MOKU : MOMO;
         const def = asleep ? frames.sleep : flap ? (kind === 'moku' ? MOKU.hop : MOMO.flap) : frames.idle;

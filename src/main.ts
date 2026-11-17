@@ -15,6 +15,7 @@ import { BASE_H, BASE_W, Ctx, spriteImage, VIEW_W } from './view/gfx.js';
 import { movieExists, playMovie, portrait, preloadPortraits } from './view/media.js';
 import { drawCursor, drawFrame, Screen } from './view/screen.js';
 import { MOKU, MOMO, PLAYER, SpriteDef } from './view/sprites.js';
+import { art } from './view/art.js';
 import { cameraFor, currentZoom, cycleZoom, darkness, drawWorld, PlayerAnim, updateCows } from './view/world.js';
 
 // ---------------------------------------------------------------- 準備
@@ -916,7 +917,13 @@ function drawMenu(ctx: Ctx): void {
     if (game.companions.momo.met) list.push(['ももっちゅ', MOMO.idle, momoAsleep(game.clock), '夜でも働けるが、朝に弱い。']);
     list.forEach(([name, def, asleep, note], i) => {
       const y = 70 + i * 28;
-      ctx.drawImage(spriteImage(def), 50, y - 2, 20, 20);
+      // Ronnie の素材の正面の絵（読み込み前はドット絵）。高解像度のまま縦横比を保って描く
+      const img = art(i === 0 ? 'moku-front' : 'momo-front');
+      if (img) {
+        const h = 22;
+        const w = (img.naturalWidth / img.naturalHeight) * h;
+        screen.image(img, 60 - w / 2, y - 4, w, h);
+      } else ctx.drawImage(spriteImage(def), 50, y - 2, 20, 20);
       screen.text(74, y, `${name}　${asleep ? '（ねている）' : '（おきている）'}`, { size: 10 });
       screen.text(74, y + 13, note, { size: 9, color: '#b8b0e0' });
     });
