@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayOf, formatClock, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
-import { AREAS, bridgeDeck, HOME, isBlockedAt, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
+import { AREAS, bridgeDeck, footFree, HOME, isBlockedAt, nearestFree, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from '../src/core/names.js';
 import { CROPS, FORGE, MINUTES_PER_DAY, TIME } from '../src/core/params.js';
 import { LocalSaveStore, MemoryKeyValue } from '../src/core/save/localStore.js';
@@ -225,6 +225,15 @@ test('村：小屋の前・畑の中・浜辺・慰霊碑の前は歩け、川�
   assert.equal(v(1000, 400), true); // 森
   assert.equal(v(1250, 790), true); // 畑の前の柵
   assert.equal(v(700, 1230), true); // 石垣
+});
+
+test('保存した位置が通れない所の中でも、近くの立てる所から再開できる', () => {
+  // 荒野の看板の柱の中（v0.5.2 で通れなくなった所）
+  const p = nearestFree('village', 1650, 796);
+  assert.ok(footFree('village', p.x, p.y));
+  assert.ok(Math.hypot(p.x - 1650, p.y - 796) < 40);
+  // 立てる所はそのまま
+  assert.deepEqual(nearestFree('village', HOME.x, HOME.y), { x: HOME.x, y: HOME.y });
 });
 
 test('村：反り橋は床の線に沿って歩け、手前の欄干の上には乗れない', () => {

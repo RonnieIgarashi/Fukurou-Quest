@@ -584,6 +584,33 @@ export function isBlockedAt(area: AreaId, x: number, y: number): boolean {
   return a.blocked.some((p) => inPoly(x, y, p)) && !a.open.some((p) => inPoly(x, y, p));
 }
 
+/** 足元の小さな四角（幅16・高さ6）がどこもふさがっていないか（主人公の当たりと同じ） */
+export function footFree(area: AreaId, x: number, y: number): boolean {
+  return [
+    [x - 8, y - 6],
+    [x + 8, y - 6],
+    [x - 8, y],
+    [x + 8, y],
+  ].every(([px, py]) => !isBlockedAt(area, px, py));
+}
+
+/**
+ * 立てる場所に直す。地形を直したせいで、セーブした位置が通れない所の中になったときに使う
+ * （2026-11-18：荒野の看板の当たりを変えて、その場所で保存していた日記帳が動けなくなった）。
+ * 近い所から順に探し、見つからなければ小屋の前（村）・部屋の真ん中（室内）へ
+ */
+export function nearestFree(area: AreaId, x: number, y: number): { x: number; y: number } {
+  if (footFree(area, x, y)) return { x, y };
+  for (let r = 4; r <= 240; r += 4)
+    for (let k = 0; k < 24; k++) {
+      const a = (k / 24) * Math.PI * 2;
+      const px = x + Math.cos(a) * r;
+      const py = y + Math.sin(a) * r;
+      if (footFree(area, px, py)) return { x: px, y: py };
+    }
+  return area === 'village' ? { ...HOME } : { x: 400, y: 330 };
+}
+
 /** その位置で調べられるもの */
 export function spotAt(area: AreaId, x: number, y: number): Spot | null {
   if (area === 'village') {

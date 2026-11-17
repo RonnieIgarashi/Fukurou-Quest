@@ -1,6 +1,6 @@
 // 起動と画面の切り替え（タイトル → セーブ枠 → 名前入力 → ムービー → フィールド）。
 import { dayOf, formatClock, hourFloat, START_TIME } from './core/clock.js';
-import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, isBlockedAt, Spot, spotAt } from './core/map.js';
+import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, isBlockedAt, nearestFree, Spot, spotAt } from './core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from './core/names.js';
 import { CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
@@ -15,7 +15,7 @@ import { BASE_H, BASE_W, Ctx, spriteImage, VIEW_W } from './view/gfx.js';
 import { movieExists, playMovie, portrait, preloadPortraits } from './view/media.js';
 import { drawCursor, drawFrame, Screen } from './view/screen.js';
 import { MOKU, MOMO, PLAYER, SpriteDef } from './view/sprites.js';
-import { cameraFor, darkness, drawWorld, PlayerAnim, updateCows } from './view/world.js';
+import { cameraFor, currentZoom, cycleZoom, darkness, drawWorld, PlayerAnim, updateCows } from './view/world.js';
 
 // ---------------------------------------------------------------- 準備
 
@@ -290,6 +290,8 @@ let toasts: { text: string; t0: number; key?: string }[] = [];
 let saveRequested = false;
 
 function toast(text: string, key?: string): void {
+  // 同じ種類の知らせ（もじ・ズームなど）は、前のを消してから出す
+  if (key) toasts = toasts.filter((m) => m.key !== key);
   toasts.push({ text, t0: t, key });
   if (toasts.length > 3) toasts.shift();
 }
@@ -356,6 +358,9 @@ async function continueGame(slot: string): Promise<void> {
     return;
   }
   game = f.game;
+  // 地形を直したせいで、保存した位置が通れない所の中になっていたら、近くの立てる所へ
+  const p = game.player;
+  Object.assign(p, nearestFree(p.area, p.x, p.y));
   slotId = slot;
   createdAt = new Date(f.createdAt);
   resetField();
@@ -597,6 +602,12 @@ function updateField(dt: number): void {
   else anim.moving = false;
   moveCompanions(dt);
   updateCows(dt);
+  if (wasPressed('zoom')) {
+    if (game.player.area === 'village') {
+      const z = cycleZoom();
+      toast(['ふだんの見え方', '少し引いた見え方', '村全体の見え方'][z] + '（Q で切り替え）', 'zoom');
+    } else toast('建物の中では引いて見られません。', 'zoom');
+  }
   if (wasPressed('ok')) interact();
   else if (wasPressed('menu', 'cancel')) menu = { kind: 'main', idx: 0 };
 
@@ -942,7 +953,7 @@ function drawField(ctx: Ctx): void {
   if (!menu && !busy && !beats.length && (frontSpot() || talkTarget())) {
     // フィールド（800x450）の座標を UI（384x216）の座標に直す
     const cam = cameraFor(game);
-    const k = BASE_W / VIEW_W;
+    const k = BASE_W / (VIEW_W * currentZoom());
     const cx = Math.round((game.player.x - cam.x) * k);
     const cy = Math.round((game.player.y - cam.y - 66) * k);
     drawFrame(ctx, cx - 10, cy - 12, 20, 12, 0.85);

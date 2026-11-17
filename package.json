@@ -8,7 +8,7 @@
     "build": "tsc -p tsconfig.json",
     "watch": "tsc -p tsconfig.json --watch",
     "test": "tsc -p tsconfig.test.json && node --test \".test-build/tests/*.test.js\"",
-    "serve": "python -m http.server 8766 --directory public"
+    "serve": "python tools/serve.py 8766"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",

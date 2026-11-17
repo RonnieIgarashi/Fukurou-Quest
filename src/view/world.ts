@@ -230,11 +230,46 @@ function areaArt(area: AreaId) {
 }
 
 
+// ---------------------------------------------------------------- 引きの俯瞰（ズームアウト）
+
+/**
+ * 映す広さの倍率（1＝ふだん。2026-11-18 Ronnie「町全体を見れるくらいのズームオフ機能」）。
+ * Q キーで 1 → 1.8 → 村全体 → 1 と切り替える。室内ではいつも 1
+ */
+const ZOOMS = [1, 1.8, Math.max(2000 / VIEW_W, 1493 / VIEW_H)];
+let zoomIdx = 0;
+let zoom = 1;
+let zoomT = -1;
+
+export function cycleZoom(): number {
+  zoomIdx = (zoomIdx + 1) % ZOOMS.length;
+  return zoomIdx;
+}
+
+/** 今の倍率（「！」の案内の位置合わせに使う） */
+export function currentZoom(): number {
+  return zoom;
+}
+
+function updateZoom(area: AreaId, t: number): void {
+  const target = area === 'village' ? ZOOMS[zoomIdx] : 1;
+  const dt = zoomT < 0 ? 1 : Math.min(0.1, Math.max(0, t - zoomT));
+  zoomT = t;
+  if (area !== 'village') zoom = 1;
+  else zoom += (target - zoom) * Math.min(1, dt * 7);
+  if (Math.abs(target - zoom) < 0.002) zoom = target;
+}
+
+const vw = () => VIEW_W * zoom;
+const vh = () => VIEW_H * zoom;
+
 export function cameraFor(s: GameState): Camera {
   const a = AREAS[s.player.area];
+  // 映す広さが絵より広いときは、真ん中に置く（まわりは暗い色）
+  const axis = (size: number, view: number, at: number) => (view >= size ? (size - view) / 2 : Math.max(0, Math.min(size - view, at - view / 2)));
   return {
-    x: Math.round(Math.max(0, Math.min(a.w - VIEW_W, s.player.x - VIEW_W / 2))),
-    y: Math.round(Math.max(0, Math.min(a.h - VIEW_H, s.player.y - 30 - VIEW_H / 2))),
+    x: Math.round(axis(a.w, vw(), s.player.x)),
+    y: Math.round(axis(a.h, vh(), s.player.y - 30)),
   };
 }
 
@@ -629,7 +664,7 @@ function drawShore(ctx: Ctx, t: number, cam: Camera): void {
       else ctx.lineTo(p.x, y);
     }
   };
-  if (cam.y + VIEW_H < 1300) return;
+  if (cam.y + vh() < 1300) return;
   // 濡れた砂（波が引いたあと）
   line((d) => 4 + 14 * wave(d));
   for (let d = total; d >= 0; d -= 12) {
@@ -706,7 +741,7 @@ const leafEmit = Object.fromEntries(Object.keys(SWAYS).map((k) => [k, new Emitte
 function emitLeaves(dt: number, cam: Camera): void {
   for (const [name, s] of Object.entries(SWAYS)) {
     // 画面の近くの木だけ
-    if (s.cx + s.rx < cam.x - 60 || s.cx - s.rx > cam.x + VIEW_W + 60 || s.cy - s.ry > cam.y + VIEW_H || s.pivotY + 60 < cam.y) continue;
+    if (s.cx + s.rx < cam.x - 60 || s.cx - s.rx > cam.x + vw() + 60 || s.cy - s.ry > cam.y + vh() || s.pivotY + 60 < cam.y) continue;
     for (let i = leafEmit[name].count(dt); i > 0; i--) {
       const a = rand(0, Math.PI * 2);
       const r = Math.sqrt(rand());
@@ -857,7 +892,7 @@ function drawFountain(ctx: Ctx, t: number): void {
 }
 
 function drawWater(ctx: Ctx, t: number, cam: Camera): void {
-  const near = (x0: number, y0: number, x1: number, y1: number) => x1 > cam.x && x0 < cam.x + VIEW_W && y1 > cam.y && y0 < cam.y + VIEW_H;
+  const near = (x0: number, y0: number, x1: number, y1: number) => x1 > cam.x && x0 < cam.x + vw() && y1 > cam.y && y0 < cam.y + vh();
   if (near(150, 420, 600, 1000)) flowStreaks(ctx, RIVER, RIVER_ACC, t, 46, 38, 26, 14, 0.55, 0);
   if (near(80, 1080, 320, 1460)) flowStreaks(ctx, FALLS, FALLS_ACC, t, 60, 110, 90, 22, 0.6, 500);
   drawShore(ctx, t, cam);
@@ -964,16 +999,25 @@ function vignette(ctx: Ctx): void {
 export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, clock = s.clock): Camera {
   const area = s.player.area;
   const a = areaArt(area);
+  updateZoom(area, t);
   const cam = cameraFor(s);
   const forgeBusy = s.forge.queue.length > 0 || s.forge.ready > 0;
   updateFx(area, t, forgeBusy, cam);
-  const inView = (co: Cutout) => co.x1 > cam.x && co.x0 < cam.x + VIEW_W && co.y1 > cam.y && co.y0 < cam.y + VIEW_H;
+  const inView = (co: Cutout) => co.x1 > cam.x && co.x0 < cam.x + vw() && co.y1 > cam.y && co.y0 < cam.y + vh();
   ctx.save();
+  ctx.scale(1 / zoom, 1 / zoom);
   ctx.translate(-cam.x, -cam.y);
-  if (a?.ready) ctx.drawImage(a.img, cam.x, cam.y, VIEW_W, VIEW_H, cam.x, cam.y, VIEW_W, VIEW_H);
+  if (a?.ready) {
+    // 絵からはみ出す所は切り詰めて描く（村全体を映すときは、絵の左右に暗い帯が出る）
+    const sx = Math.max(0, cam.x);
+    const sy = Math.max(0, cam.y);
+    const sw = Math.min(a.img.naturalWidth, cam.x + vw()) - sx;
+    const sh = Math.min(a.img.naturalHeight, cam.y + vh()) - sy;
+    ctx.drawImage(a.img, sx, sy, sw, sh, sx, sy, sw, sh);
+  }
   else if (area === 'village') {
     ctx.fillStyle = '#9cbf6a';
-    ctx.fillRect(cam.x, cam.y, VIEW_W, VIEW_H);
+    ctx.fillRect(cam.x, cam.y, vw(), vh());
   } else {
     ctx.drawImage(interiorImage(area), 0, 0, 800, 450);
     roomFx.draw(ctx);
@@ -1046,7 +1090,7 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
     if (r + g + b < 765) {
       ctx.globalCompositeOperation = 'multiply';
       ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      ctx.fillRect(cam.x, cam.y, VIEW_W, VIEW_H);
+      ctx.fillRect(cam.x, cam.y, vw(), vh());
       ctx.globalCompositeOperation = 'source-over';
     }
     if (dark > 0.15) {
@@ -1062,7 +1106,7 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
         const fx = 400 + ((i * 397) % 1300) + Math.sin(t * 0.7 + i) * 30;
         const fy = 680 + ((i * 211) % 520) + Math.cos(t * 0.5 + i * 2) * 20;
         const blink = (Math.sin(t * 2 + i * 1.7) + 1) / 2;
-        if (fx < cam.x - 8 || fy < cam.y - 8 || fx > cam.x + VIEW_W + 8 || fy > cam.y + VIEW_H + 8) continue;
+        if (fx < cam.x - 8 || fy < cam.y - 8 || fx > cam.x + vw() + 8 || fy > cam.y + vh() + 8) continue;
         glow(ctx, fx, fy, 8, 'rgba(210, 255, 140, A)', 0.5 * blink * dark);
         ctx.fillStyle = `rgba(240, 255, 200, ${blink * dark})`;
         ctx.fillRect(fx, fy, 1.2, 1.2);
