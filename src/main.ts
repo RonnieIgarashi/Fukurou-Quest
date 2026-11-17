@@ -479,11 +479,11 @@ function moveCompanions(dt: number): void {
       const sp = Math.min(d, (k === 'moku' ? 34 : 46) * dt);
       c.x += (dx / d) * sp;
       c.y += (dy / d) * sp;
-      // 向き（素材の絵は正面・後ろ・横の3つ。横の動きを少し優先する）
-      if (Math.abs(dx) > Math.abs(dy) * 0.7) c.dir = dx < 0 ? 'left' : 'right';
+      // 向き（素材の絵は正面・後ろ・横の3つ）。縦に動くときは正面・後ろの絵が出るよう、横は斜めより横寄りのときだけ
+      if (Math.abs(dx) > Math.abs(dy) * 1.3) c.dir = dx < 0 ? 'left' : 'right';
       else c.dir = dy < 0 ? 'up' : 'down';
-    } else if (r.wait > 0 && c.dir === 'up') {
-      // 止まったら、こちら（正面）を向く
+    } else if (r.wait > 0 && c.dir !== 'down') {
+      // 止まったら、こちら（正面）を向く（2026-11-18 Ronnie「正面と背面の画像も盛り込んで」）
       c.dir = 'down';
     } else {
       r.wait -= dt;
@@ -491,8 +491,10 @@ function moveCompanions(dt: number): void {
         // 小屋のまわり（扉の前から半径150ほど）で、次に行く所を決める
         const a = Math.random() * Math.PI * 2;
         const rad = 30 + Math.random() * 120;
-        r.tx = HOME.x + Math.cos(a) * rad * 1.3;
-        r.ty = Math.max(HOME.y + 6, HOME.y + 60 + Math.sin(a) * rad * 0.6);
+        // ときどき縦に大きく動いて、正面・後ろ姿も見せる
+        const tall = Math.random() < 0.35;
+        r.tx = HOME.x + Math.cos(a) * rad * (tall ? 0.4 : 1.3);
+        r.ty = Math.max(HOME.y + 6, HOME.y + 60 + Math.sin(a) * rad * (tall ? 1.0 : 0.6));
         r.wait = 2 + Math.random() * 5;
       }
     }
