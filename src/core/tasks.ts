@@ -1,7 +1,7 @@
 // タスク（行動）。実行すると効果を反映し、所要時間ぶん advance() で時間をまとめて進める。
 import { formatClock, minuteOfDay } from './clock.js';
 import { Spot } from './map.js';
-import { CropId, CROPS, FORGE, FUELS, GOODS, MINUTES_PER_HOUR, TASK_MINUTES, TIME } from './params.js';
+import { CropId, CROPS, FORGE, FUELS, GOODS, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
 import { advance, GameEvent, sleepUntilMorning } from './sim.js';
 import { FARM_MANA, GameState, MANA_NAMES } from './state.js';
 
@@ -39,6 +39,17 @@ function burnFuel(s: GameState, amount: number): string[] {
     used.push(GOODS[f].name);
   }
   return used;
+}
+
+/** 持ち歩いている水の合計（杯） */
+export function carriedWater(s: GameState): number {
+  return s.water.carried.river + s.water.carried.pure;
+}
+
+/** 収穫できる量（きれいな水で育った日が多いほど増える） */
+export function harvestYield(crop: CropId, pureDays: number): number {
+  const c = CROPS[crop];
+  return c.yield + Math.round(c.yield * WATER.PURE_YIELD_BONUS * Math.min(1, pureDays / c.days));
 }
 
 function canSleep(s: GameState): boolean {
@@ -90,7 +101,48 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
           disabled: s.inv.seeds[c] <= 0 ? `${CROPS[c].name}の種がない` : null,
         }));
       if (p.stage === 'ready') return [{ id: 'harvest', label: '収穫する', minutes: TASK_MINUTES.harvest, disabled: null }];
-      return [{ id: 'lookPlot', label: '様子を見る', minutes: 0, disabled: null }];
+      const already = p.watered !== 'none' ? '今日はもう水をやった' : null;
+      return [
+        {
+          id: 'water:pure',
+          label: `きれいな水をやる（${s.water.carried.pure}）`,
+          minutes: TASK_MINUTES.water,
+          disabled: already ?? (s.water.carried.pure <= 0 ? 'きれいな水を持っていない（水くみ場でくめる）' : null),
+        },
+        {
+          id: 'water:river',
+          label: `川の水をやる（${s.water.carried.river}）`,
+          minutes: TASK_MINUTES.water,
+          disabled: already ?? (s.water.carried.river <= 0 ? '川の水を持っていない（水くみ場でくめる）' : null),
+        },
+        { id: 'lookPlot', label: '様子を見る', minutes: 0, disabled: null },
+      ];
+    }
+    case 'barrel': {
+      const full = carriedWater(s) >= WATER.CARRY_MAX ? `これ以上は持てない（${WATER.CARRY_MAX}杯まで）` : null;
+      return [
+        {
+          id: 'drink',
+          label: `水を飲む（きれいな水 樽に${s.water.barrelPure}杯）`,
+          minutes: TASK_MINUTES.drink,
+          disabled: s.water.barrelPure <= 0 ? '樽にきれいな水がない（川の水はそのままでは飲めない）' : null,
+        },
+        {
+          id: 'purify',
+          label: '樽の水を浄化する（水のマナ1）',
+          minutes: TASK_MINUTES.purify,
+          disabled:
+            s.water.barrelPure >= WATER.BARREL_CUPS ? '樽の水はもう浄化してある' : s.inv.mana.water <= 0 ? '水のマナを持っていない' : null,
+        },
+        {
+          id: 'drawPure',
+          label: 'きれいな水をくむ',
+          minutes: TASK_MINUTES.drawWater,
+          disabled: s.water.barrelPure <= 0 ? '樽にきれいな水がない' : full,
+        },
+        { id: 'drawRiver', label: '川の水をくむ', minutes: TASK_MINUTES.drawWater, disabled: full },
+        { id: 'lookBarrel', label: '様子を見る', minutes: 0, disabled: null },
+      ];
     }
     // 出入り・見るだけの場所はタスクを持たない（main.ts が扱う）
     case 'enter':
@@ -105,8 +157,9 @@ function plotStatus(s: GameState, spot: Spot): string {
   if (!p || !p.crop) return '何も植わっていない。';
   const c = CROPS[p.crop];
   const left = c.days - p.growth;
-  const stall = p.stalled ? ' マナが足りず、生育が止まっている。' : '';
-  return `${c.name}が育っている。収穫まであと${left}日。${stall}`;
+  const stall = p.dry ? ' 水が無く、育たなかった。' : p.stalled ? ' マナが足りず、生育が止まっている。' : '';
+  const today = p.watered === 'pure' ? '今日はきれいな水をやった。' : p.watered === 'river' ? '今日は川の水をやった。' : '今日はまだ水をやっていない。';
+  return `${c.name}が育っている。収穫まであと${left}日。${today}${stall}`;
 }
 
 function manaLine(s: GameState): string {
@@ -169,17 +222,53 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     p.growth = 0;
     p.stalled = false;
     pass(TASK_MINUTES.plant);
-    messages.push(`${CROPS[crop].name}の種をまいた。毎朝、地・水・火・風のマナを1つずつ使って育つ。（いま ${manaLine(s)}）`);
+    p.watered = 'none';
+    p.dry = false;
+    p.pureDays = 0;
+    messages.push(`${CROPS[crop].name}の種をまいた。毎日水をやると、次の朝に地・水・火・風のマナを1つずつ使って育つ。（いま ${manaLine(s)}）`);
   } else if (id === 'harvest' && p && p.crop) {
     const c = CROPS[p.crop];
-    s.inv.crops[p.crop] += c.yield;
-    messages.push(`${c.name}を${c.yield}つ収穫した！`);
+    const n = harvestYield(p.crop, p.pureDays);
+    s.inv.crops[p.crop] += n;
+    messages.push(n > c.yield ? `${c.name}を${n}つ収穫した！ きれいな水のおかげで、いつもより多い。` : `${c.name}を${n}つ収穫した！`);
     p.stage = 'tilled';
     p.crop = null;
     p.growth = 0;
+    p.pureDays = 0;
     pass(TASK_MINUTES.harvest);
   } else if (id === 'lookPlot') {
     messages.push(plotStatus(s, spot));
+  } else if (id.startsWith('water:') && p) {
+    const kind = id.slice(6) as 'pure' | 'river';
+    s.water.carried[kind]--;
+    p.watered = kind;
+    pass(TASK_MINUTES.water);
+    messages.push(kind === 'pure' ? 'きれいな水をやった。よく育ちそうだ。' : '川の水をやった。');
+  } else if (id === 'drink') {
+    s.water.barrelPure--;
+    s.body.thirst = 0;
+    pass(TASK_MINUTES.drink);
+    messages.push('きれいな水を飲んだ。のどがうるおった。');
+  } else if (id === 'purify') {
+    s.inv.mana.water--;
+    s.water.barrelPure = WATER.BARREL_CUPS;
+    pass(TASK_MINUTES.purify);
+    messages.push(`水のマナを樽に入れた。川の水が澄んで、きれいな水が${WATER.BARREL_CUPS}杯ぶんになった。`);
+  } else if (id === 'drawPure') {
+    s.water.barrelPure--;
+    s.water.carried.pure++;
+    pass(TASK_MINUTES.drawWater);
+    messages.push(`きれいな水を1杯くんだ。（持っている水 きれい${s.water.carried.pure}・川${s.water.carried.river}）`);
+  } else if (id === 'drawRiver') {
+    s.water.carried.river++;
+    pass(TASK_MINUTES.drawWater);
+    messages.push(`川の水を1杯くんだ。（持っている水 きれい${s.water.carried.pure}・川${s.water.carried.river}）`);
+  } else if (id === 'lookBarrel') {
+    messages.push(
+      s.water.barrelPure > 0
+        ? `樽には、浄化したきれいな水が${s.water.barrelPure}杯ぶん入っている。飲み水にも、畑にも使える。`
+        : '水くみ場の水樽だ。川の水がたっぷりたまっている。水のマナで浄化すると、飲み水になる。',
+    );
   }
   return { messages, events, minutes: s.clock - before };
 }

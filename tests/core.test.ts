@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { dayOf, formatClock, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
 import { AREAS, bridgeDeck, footFree, HOME, isBlockedAt, nearestFree, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from '../src/core/names.js';
-import { CROPS, FORGE, MINUTES_PER_DAY, TIME } from '../src/core/params.js';
+import { BODY, CROPS, FORGE, MINUTES_PER_DAY, TIME, WATER } from '../src/core/params.js';
 import { LocalSaveStore, MemoryKeyValue } from '../src/core/save/localStore.js';
 import { migrate, newSaveFile, SAVE_SCHEMA } from '../src/core/save/schema.js';
 import { advance, checkBedtime, mokuAsleep, momoAsleep, sleepUntilMorning } from '../src/core/sim.js';
@@ -62,11 +62,15 @@ test('豆は4属性のマナを毎朝1つずつ使って育ち、収穫できる
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
   const earth = g.inv.mana.earth;
-  for (let d = 0; d < CROPS.bean.days; d++) sleepUntilMorning(g);
+  for (let d = 0; d < CROPS.bean.days; d++) {
+    g.water.carried.river = 1;
+    runTask(g, spot, 'water:river');
+    sleepUntilMorning(g);
+  }
   assert.equal(g.plots[0].stage, 'ready');
   assert.equal(g.inv.mana.earth, earth - CROPS.bean.days);
   const r = runTask(g, spot, 'harvest');
-  assert.equal(g.inv.crops.bean, CROPS.bean.yield);
+  assert.equal(g.inv.crops.bean, CROPS.bean.yield); // 川の水では収量は増えない
   assert.ok(r.messages[0].includes('収穫'));
   assert.equal(g.plots[0].stage, 'tilled');
 });
@@ -77,11 +81,74 @@ test('火のマナが無いと生育が止まる（4属性のどれかが欠け�
   const spot = plotSpot(1);
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
+  g.water.carried.river = 1;
+  runTask(g, spot, 'water:river');
   const events = sleepUntilMorning(g);
   assert.equal(g.plots[1].growth, 0);
   assert.equal(g.plots[1].stalled, true);
   assert.ok(events.some((e) => e.kind === 'message' && e.text.includes('生育が止まっている')));
   assert.equal(g.inv.mana.earth, createGame('テスト').inv.mana.earth); // 止まった区画はマナを使わない
+});
+
+test('水をやらないと育たない（マナも使わない）', () => {
+  const g = createGame('テスト');
+  g.inv.mana.fire = 10;
+  const spot = plotSpot(2);
+  runTask(g, spot, 'till');
+  runTask(g, spot, 'plant:bean');
+  const events = sleepUntilMorning(g);
+  assert.equal(g.plots[2].growth, 0);
+  assert.equal(g.plots[2].dry, true);
+  assert.equal(g.inv.mana.fire, 10);
+  assert.ok(events.some((e) => e.kind === 'message' && e.text.includes('水が無く')));
+});
+
+test('きれいな水で育てると収量が増え、畑がマナを使ったことを知らせる', () => {
+  const g = createGame('テスト');
+  g.inv.mana.fire = 10;
+  const spot = plotSpot(3);
+  runTask(g, spot, 'till');
+  runTask(g, spot, 'plant:bean');
+  let told = false;
+  for (let d = 0; d < CROPS.bean.days; d++) {
+    g.water.carried.pure = 1;
+    runTask(g, spot, 'water:pure');
+    const ev = sleepUntilMorning(g);
+    told ||= ev.some((e) => e.kind === 'message' && e.text.includes('マナを1つずつ使った'));
+  }
+  assert.ok(told);
+  runTask(g, spot, 'harvest');
+  assert.ok(g.inv.crops.bean > CROPS.bean.yield);
+});
+
+test('水くみ場：水のマナ1で樽1杯を浄化し、飲む・くむ。川の水はそのままでは飲めない', () => {
+  const g = createGame('テスト');
+  const barrel: Spot = { kind: 'barrel' };
+  assert.ok(optionsFor(g, barrel).find((o) => o.id === 'drink')!.disabled);
+  const water = g.inv.mana.water;
+  runTask(g, barrel, 'purify');
+  assert.equal(g.inv.mana.water, water - 1);
+  assert.equal(g.water.barrelPure, WATER.BARREL_CUPS);
+  g.body.thirst = 80;
+  runTask(g, barrel, 'drink');
+  assert.ok(g.body.thirst < 1);
+  runTask(g, barrel, 'drawPure');
+  runTask(g, barrel, 'drawRiver');
+  assert.deepEqual(g.water.carried, { pure: 1, river: 1 });
+  assert.equal(g.water.barrelPure, WATER.BARREL_CUPS - 2);
+});
+
+test('のどは時間とともに渇き、眠っている間はゆっくり。走れなくなる境目で知らせる', () => {
+  const g = createGame('テスト');
+  const ev = advance(g, 12 * 60);
+  assert.ok(g.body.thirst >= BODY.THIRST_NO_RUN);
+  assert.ok(g.body.hunger > 0);
+  assert.ok(ev.some((e) => e.kind === 'message' && e.text.includes('走れない')));
+  const h = createGame('テスト');
+  h.clock += 15 * 60; // 21:00
+  const before = h.body.thirst;
+  sleepUntilMorning(h);
+  assert.ok(h.body.thirst - before < BODY.THIRST_PER_HOUR * 9 * 0.5);
 });
 
 // ---------------------------------------------------------------- 炉
@@ -188,7 +255,6 @@ test('村：小屋と鍛冶小屋に入れ、畑の6区画と、慰霊碑・森�
     [1030, 886, 'bench'],
     [1000, 1460, 'sea'],
     [1640, 808, 'wastelandSign'],
-    [500, 1020, 'waterBarrel'],
   ];
   for (const [x, y, id] of looks) {
     assert.deepEqual(spotAt('village', x, y), { kind: 'look', id }, id);

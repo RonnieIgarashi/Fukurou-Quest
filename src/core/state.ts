@@ -27,6 +27,12 @@ export interface Plot {
   growth: number;
   /** 直近の朝にマナが足りず生育が止まったか */
   stalled: boolean;
+  /** 今日やった水（朝の生育で使い、朝にまた none に戻る） */
+  watered: 'none' | 'river' | 'pure';
+  /** 直近の朝に水が足りず生育が止まったか */
+  dry: boolean;
+  /** きれいな水で育った日数（収量が増える） */
+  pureDays: number;
 }
 
 export interface Companion {
@@ -51,6 +57,10 @@ export interface GameState {
     goods: Record<GoodsId, number>;
   };
   plots: Plot[];
+  /** 水。carried は持ち歩いている水（杯）、barrelPure は水くみ場の樽の浄化した水（杯） */
+  water: { carried: { river: number; pure: number }; barrelPure: number };
+  /** からだの具合（0〜100。大きいほど渇いて・空いている） */
+  body: { thirst: number; hunger: number };
   /** 炉。queue は変化中の白のマナ1つずつの残り分、ready は取り出せる火のマナ */
   forge: { queue: number[]; ready: number };
   companions: { moku: Companion; momo: Companion };
@@ -61,7 +71,7 @@ export interface GameState {
 }
 
 export function newPlot(): Plot {
-  return { stage: 'wild', crop: null, growth: 0, stalled: false };
+  return { stage: 'wild', crop: null, growth: 0, stalled: false, watered: 'none', dry: false, pureDays: 0 };
 }
 
 export function createGame(playerName: string): GameState {
@@ -76,6 +86,8 @@ export function createGame(playerName: string): GameState {
       goods: { ...START_INVENTORY.goods },
     },
     plots: PLOTS.map(newPlot),
+    water: { carried: { river: 0, pure: 0 }, barrelPure: 0 },
+    body: { thirst: 0, hunger: 0 },
     forge: { queue: [], ready: 0 },
     companions: {
       moku: { met: true, area: 'village', x: HOME.x + 34, y: HOME.y + 4, dir: 'down' },

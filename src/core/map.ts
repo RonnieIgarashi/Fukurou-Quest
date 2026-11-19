@@ -12,9 +12,9 @@ export type AreaId = 'village' | 'hut' | 'smithy';
  * 調べられる場所の種類
  * - enter / exit：建物に入る・出る
  * - look：見るだけ（説明の台詞は story.ts の LOOK）
- * - bed / desk / forge / plot：タスクを選ぶ
+ * - bed / desk / forge / plot / barrel：タスクを選ぶ（barrel は水くみ場の樽）
  */
-export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot';
+export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot' | 'barrel';
 
 export interface Spot {
   kind: SpotKind;
@@ -256,7 +256,7 @@ const VILLAGE: Area = {
     { spot: { kind: 'look', id: 'cart' }, poly: rect(1488, 722, 1594, 788) },
     { spot: { kind: 'look', id: 'fountain' }, poly: ellipse(905, 838, 64, 32) },
     { spot: { kind: 'look', id: 'bench' }, poly: rect(990, 800, 1066, 890) },
-    { spot: { kind: 'look', id: 'waterBarrel' }, poly: rect(410, 948, 604, 1030) },
+    { spot: { kind: 'barrel' }, poly: rect(410, 948, 604, 1030) },
     { spot: { kind: 'look', id: 'cows' }, poly: PEN },
     { spot: { kind: 'look', id: 'cows' }, poly: rect(430, 860, 700, 950) },
     { spot: { kind: 'look', id: 'cabin' }, poly: rect(556, 640, 770, 728) },

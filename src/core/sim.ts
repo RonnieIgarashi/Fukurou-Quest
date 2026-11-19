@@ -2,8 +2,8 @@
 // （仕様書の原則「時間更新処理を二重実装しない」）。
 import { dayOf, isPastBedtime, minuteOfDay, nextMorning } from './clock.js';
 import { WAKE } from './map.js';
-import { CROPS, FARM_MANA_PER_PLOT_PER_DAY, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
-import { FARM_MANA, GameState } from './state.js';
+import { BODY, CROPS, FARM_MANA_PER_PLOT_PER_DAY, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
+import { FARM_MANA, GameState, MANA_NAMES } from './state.js';
 import { StoryId } from './story.js';
 
 export type GameEvent =
@@ -24,25 +24,62 @@ export function momoAsleep(t: number): boolean {
   return m >= MOMO_SLEEP.from && m < MOMO_SLEEP.to;
 }
 
-/** 毎朝 6:00 の処理：畑の生育（4属性マナを1区画ずつ均等に使う） */
+/**
+ * 毎朝 6:00 の処理：畑の生育。
+ * 前の日に水をやった区画だけが、4属性マナを1つずつ使って1日育つ（水が無い・マナが足りないと止まる）。
+ * きれいな水で育った日は数えておき、収穫のときに収量が増える。水は毎朝やり直し
+ */
 function morning(s: GameState, out: GameEvent[]): void {
   let stalled = 0;
+  let dry = 0;
+  let grew = 0;
   for (const p of s.plots) {
-    if (p.stage !== 'growing' || !p.crop) continue;
+    if (p.stage !== 'growing' || !p.crop) {
+      p.watered = 'none';
+      continue;
+    }
+    p.dry = p.watered === 'none';
+    if (p.dry) {
+      dry++;
+      continue;
+    }
     const enough = FARM_MANA.every((m) => s.inv.mana[m] >= FARM_MANA_PER_PLOT_PER_DAY);
     if (!enough) {
       p.stalled = true;
       stalled++;
-      continue;
+    } else {
+      for (const m of FARM_MANA) s.inv.mana[m] -= FARM_MANA_PER_PLOT_PER_DAY;
+      p.stalled = false;
+      p.growth++;
+      grew++;
+      if (p.watered === 'pure') p.pureDays++;
+      if (p.growth >= CROPS[p.crop].days) p.stage = 'ready';
     }
-    for (const m of FARM_MANA) s.inv.mana[m] -= FARM_MANA_PER_PLOT_PER_DAY;
-    p.stalled = false;
-    p.growth++;
-    if (p.growth >= CROPS[p.crop].days) p.stage = 'ready';
+    p.watered = 'none';
   }
+  // 畑がマナを使ったことを知らせる（2026-11-19：火のマナがいつの間にか 0 になったと Ronnie が気づいたため）
+  if (grew > 0) {
+    const used = grew * FARM_MANA_PER_PLOT_PER_DAY;
+    const left = FARM_MANA.map((m) => `${MANA_NAMES[m]}${s.inv.mana[m]}`).join(' ');
+    out.push({ kind: 'message', text: `畑の${grew}区画が育った。地・水・火・風のマナを${used}つずつ使った。（のこり ${left}）` });
+  }
+  if (dry > 0) out.push({ kind: 'message', text: `水が無く、畑の${dry}区画が育たなかった。毎日、水をやろう。` });
   if (stalled > 0) out.push({ kind: 'message', text: `マナが足りず、畑の${stalled}区画の生育が止まっている。` });
   const ready = s.plots.filter((p) => p.stage === 'ready').length;
   if (ready > 0) out.push({ kind: 'message', text: `畑の${ready}区画が収穫できそうだ。` });
+}
+
+/** のどの渇き・空腹が1分ぶん進む（眠っている間はゆっくり） */
+function bodyStep(s: GameState, minutes: number, sleeping: boolean, out: GameEvent[]): void {
+  const k = (sleeping ? BODY.SLEEP_RATE : 1) * (minutes / MINUTES_PER_HOUR);
+  const before = s.body.thirst;
+  s.body.thirst = Math.min(100, s.body.thirst + BODY.THIRST_PER_HOUR * k);
+  s.body.hunger = Math.min(100, s.body.hunger + BODY.HUNGER_PER_HOUR * k);
+  if (sleeping) return;
+  if (before < BODY.THIRST_WARN && s.body.thirst >= BODY.THIRST_WARN)
+    out.push({ kind: 'message', text: 'のどが渇いてきた。水くみ場で水を飲もう。' });
+  if (before < BODY.THIRST_NO_RUN && s.body.thirst >= BODY.THIRST_NO_RUN)
+    out.push({ kind: 'message', text: 'のどがカラカラで、走れない……。' });
 }
 
 function fireStory(s: GameState, id: StoryId, out: GameEvent[]): void {
@@ -90,13 +127,14 @@ function forgeStep(s: GameState, minutes: number, out: GameEvent[]): void {
  * 時間を minutes 分進める。正時をまたぐたびに onHour を呼ぶので、
  * 一度に何時間進めても、1分ずつ進めても結果は同じになる。
  */
-export function advance(s: GameState, minutes: number): GameEvent[] {
+export function advance(s: GameState, minutes: number, sleeping = false): GameEvent[] {
   const out: GameEvent[] = [];
   let remaining = Math.max(0, Math.floor(minutes));
   while (remaining > 0) {
     const toHour = MINUTES_PER_HOUR - (s.clock % MINUTES_PER_HOUR);
     const step = Math.min(remaining, toHour);
     forgeStep(s, step, out);
+    bodyStep(s, step, sleeping, out);
     s.clock += step;
     remaining -= step;
     if (s.clock % MINUTES_PER_HOUR === 0) onHour(s, out);
@@ -108,7 +146,7 @@ export function advance(s: GameState, minutes: number): GameEvent[] {
 export function sleepUntilMorning(s: GameState): GameEvent[] {
   // 22時前に自分から寝たときは、寝ている間に「眠くなっちゃった」の場面を出さない（起きた直後に出てしまうため）
   s.flags['story.firstNight'] = true;
-  const events = advance(s, nextMorning(s.clock) - s.clock);
+  const events = advance(s, nextMorning(s.clock) - s.clock, true);
   s.player.area = WAKE.area;
   s.player.x = WAKE.x;
   s.player.y = WAKE.y;

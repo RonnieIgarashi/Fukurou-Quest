@@ -6,8 +6,9 @@ import { SaveFile, SaveSummary } from './store.js';
 /**
  * 1→2：村が一枚絵になり、座標が変わった（畑の番号と中身はそのまま）
  * 2→3：エリア（村・小屋の中・鍛冶小屋の中）を持つようになった。無ければ村
+ * 3→4：水（持っている水・樽の浄化した水）・からだの具合・畑の水やりを持つようになった。無ければ初期値
  */
-export const SAVE_SCHEMA = 3;
+export const SAVE_SCHEMA = 4;
 
 export function newSaveFile(slotId: string, game: GameState, now: Date, ownerId: string | null = null): SaveFile {
   const iso = now.toISOString();
@@ -52,8 +53,21 @@ export function migrate(raw: unknown): SaveFile | null {
     },
     plots:
       Array.isArray(g.plots) && g.plots.length === base.plots.length
-        ? g.plots.map((p) => ({ stage: p.stage, crop: p.crop, growth: p.growth, stalled: p.stalled }))
+        ? g.plots.map((p) => ({
+            stage: p.stage,
+            crop: p.crop,
+            growth: p.growth,
+            stalled: p.stalled,
+            watered: p.watered === 'pure' || p.watered === 'river' ? p.watered : 'none',
+            dry: p.dry === true,
+            pureDays: typeof p.pureDays === 'number' ? p.pureDays : 0,
+          }))
         : base.plots,
+    water: {
+      carried: { ...base.water.carried, ...(g.water?.carried ?? {}) },
+      barrelPure: typeof g.water?.barrelPure === 'number' ? g.water.barrelPure : base.water.barrelPure,
+    },
+    body: { ...base.body, ...(g.body ?? {}) },
     forge: { ...base.forge, ...(g.forge ?? {}) },
     companions: {
       moku: { ...base.companions.moku, ...(g.companions?.moku ?? {}), ...(schema < 2 ? { x: base.companions.moku.x, y: base.companions.moku.y } : {}) },

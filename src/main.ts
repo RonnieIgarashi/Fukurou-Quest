@@ -2,7 +2,7 @@
 import { dayOf, formatClock, hourFloat, START_TIME } from './core/clock.js';
 import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, isBlockedAt, nearestFree, Spot, spotAt } from './core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from './core/names.js';
-import { CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME } from './core/params.js';
+import { BODY, CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
 import { newSaveFile } from './core/save/schema.js';
 import { SaveStore, SaveSummary } from './core/save/store.js';
@@ -399,7 +399,8 @@ function movePlayer(dt: number): void {
   if (!anim.moving) return;
   p.dir = dx !== 0 ? (dx > 0 ? 'right' : 'left') : dy > 0 ? 'down' : 'up';
   const len = Math.hypot(dx, dy);
-  const sp = isHeld('run') ? RUN_SPEED : SPEED;
+  // のどが渇いていると走れない（2026-11-19 Ronnie 指示）
+  const sp = isHeld('run') && game.body.thirst < BODY.THIRST_NO_RUN ? RUN_SPEED : SPEED;
   const vx = (dx / len) * sp * dt;
   const vy = (dy / len) * sp * dt;
   const before = { x: p.x, y: p.y };
@@ -759,6 +760,37 @@ function drawOrb(ctx: Ctx, x: number, y: number, color: string): void {
   ctx.fill();
 }
 
+/**
+ * のどの渇き（目立たないよう、時計の枠の右下に小さなしずくだけ。2026-11-19 Ronnie「目立たないような表示で」）。
+ * しずくの中の水が、渇くほど減る。走れないほど渇くと、しずくがゆっくり点滅する
+ */
+function drawThirst(ctx: Ctx): void {
+  const x = 72;
+  const y = 23;
+  const left = 1 - game.body.thirst / 100;
+  const parched = game.body.thirst >= BODY.THIRST_NO_RUN;
+  ctx.globalAlpha = parched ? 0.55 + 0.35 * Math.sin(t * 3) : 0.6;
+  // しずくの形（上がとがった丸）
+  const shape = [
+    [3, 0, 1],
+    [2, 1, 3],
+    [2, 2, 3],
+    [1, 3, 5],
+    [1, 4, 5],
+    [0, 5, 7],
+    [0, 6, 7],
+    [1, 7, 5],
+    [2, 8, 3],
+  ];
+  ctx.fillStyle = '#3a3660';
+  for (const [dx, dy, w] of shape) ctx.fillRect(x + dx, y + dy, w, 1);
+  // 中の水（下から）
+  const fillRows = Math.round(left * shape.length);
+  ctx.fillStyle = parched ? '#d88a6a' : '#7fb8e8';
+  shape.slice(shape.length - fillRows).forEach(([dx, dy, w]) => ctx.fillRect(x + dx, y + dy, w, 1));
+  ctx.globalAlpha = 1;
+}
+
 function drawHud(ctx: Ctx, clock: number): void {
   drawFrame(ctx, 6, 6, 78, 30, 0.8);
   screen.text(14, 9, `${dayOf(clock)}日目`, { size: 11 });
@@ -783,6 +815,7 @@ function drawHud(ctx: Ctx, clock: number): void {
     ctx.fillRect(20, 26, 1, 2);
   }
   screen.text(24, 22, formatClock(clock), { size: 10, color: '#e8e2ff' });
+  drawThirst(ctx);
 
   const w = 5 * 30 + 8;
   const x0 = BASE_W - 6 - w;
@@ -900,7 +933,7 @@ function drawMenu(ctx: Ctx): void {
     screen.text(BASE_W - 80, 53 + i * 16, label === 'もじ' ? kanaLabel() : label, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
   });
   if (menu.kind === 'items') {
-    drawFrame(ctx, 40, 46, 230, 134);
+    drawFrame(ctx, 40, 46, 250, 148);
     screen.text(52, 52, 'もちもの', { size: 11, color: '#ffe066' });
     const crops = Object.keys(CROPS) as CropId[];
     const rows = [
@@ -909,6 +942,7 @@ function drawMenu(ctx: Ctx): void {
       `マナ　${MANA_IDS.map((m) => `${MANA_NAMES[m]}${game.inv.mana[m]}`).join('　')}`,
       `素材　${(Object.keys(GOODS) as GoodsId[]).map((g) => `${GOODS[g].name}${game.inv.goods[g]}`).join('　')}`,
       `炉　変化中${game.forge.queue.length}・取り出せる火${game.forge.ready}`,
+      `水　きれい${game.water.carried.pure}・川${game.water.carried.river}（樽のきれいな水${game.water.barrelPure}）`,
     ];
     rows.forEach((r, i) => screen.text(52, 68 + i * 14, r, { size: 10 }));
   }

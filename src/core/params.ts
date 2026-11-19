@@ -28,6 +28,10 @@ export const TASK_MINUTES = {
   feedForge: 10, // 炉に白のマナを入れる
   takeFire: 5, // 炉から火のマナを取り出す
   rest: 60, // 小屋で休む
+  drawWater: 5, // 水くみ場で水をくむ
+  purify: 20, // 樽の水を浄化する
+  drink: 5, // 水を飲む
+  water: 10, // 畑に水をやる
 } as const;
 
 export type CropId = 'bean' | 'wheat';
@@ -46,6 +50,38 @@ export const FORGE = {
   CONVERT_MINUTES: 6 * MINUTES_PER_HOUR,
   CAPACITY: 4,
   FUEL_PER_MANA: 1,
+} as const;
+
+/**
+ * 水（2026-11-19 Ronnie 指示）。
+ * 【確定】水くみ場の樽の川の水を、水のマナで浄化する。樽1杯で水のマナ1。
+ * 【確定】作物は水をやらないと育たない。浄化した水だと収量が増える。
+ * 【仮】樽1杯の杯数・持ち歩ける量・収量の増え方
+ */
+export const WATER = {
+  /** 樽1杯＝この杯数（飲む・畑にやるのに1杯ずつ使う） */
+  BARREL_CUPS: 10,
+  /** 持ち歩ける水（桶）の上限（川の水・きれいな水の合計） */
+  CARRY_MAX: 10,
+  /** 収穫までの毎日をきれいな水で育てたときに増える割合（日数に比例） */
+  PURE_YIELD_BONUS: 0.5,
+} as const;
+
+/**
+ * からだの具合（2026-11-19 Ronnie 指示）。0〜100 で、大きいほど渇いて・空いている。
+ * 【確定】水を飲まないとのどが渇いて走れなくなる。空腹は、食べ物ができるまでは数値だけ持つ。
+ * 【仮】増える速さ・走れなくなる境目
+ */
+export const BODY = {
+  /** 起きている間、1時間あたりに増える量（6時〜22時の16時間で約96） */
+  THIRST_PER_HOUR: 6,
+  HUNGER_PER_HOUR: 4,
+  /** 眠っている間は、この割合でゆっくり増える */
+  SLEEP_RATE: 0.3,
+  /** のどの渇きがこれ以上だと走れない */
+  THIRST_NO_RUN: 70,
+  /** 知らせを出す境目 */
+  THIRST_WARN: 50,
 } as const;
 
 /** 素材。【確定】ウシを倒すと落ちる（肉・皮・毛・骨）。薪は森で集める想定 */
