@@ -2,7 +2,7 @@
 import { dayOf, formatClock, hourFloat, START_TIME } from './core/clock.js';
 import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, isBlockedAt, nearestFree, Spot, spotAt } from './core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from './core/names.js';
-import { BODY, CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME } from './core/params.js';
+import { BODY, CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME, WATER } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
 import { newSaveFile } from './core/save/schema.js';
 import { SaveStore, SaveSummary } from './core/save/store.js';
@@ -942,7 +942,7 @@ function drawMenu(ctx: Ctx): void {
       `マナ　${MANA_IDS.map((m) => `${MANA_NAMES[m]}${game.inv.mana[m]}`).join('　')}`,
       `素材　${(Object.keys(GOODS) as GoodsId[]).map((g) => `${GOODS[g].name}${game.inv.goods[g]}`).join('　')}`,
       `炉　変化中${game.forge.queue.length}・取り出せる火${game.forge.ready}`,
-      `水　きれい${game.water.carried.pure}・川${game.water.carried.river}（樽のきれいな水${game.water.barrelPure}）`,
+      `水　きれい${game.water.carried.pure}・川${game.water.carried.river}（樽のきれいな水 ${game.water.barrelPure}/${WATER.BARREL}）`,
     ];
     rows.forEach((r, i) => screen.text(52, 68 + i * 14, r, { size: 10 }));
   }

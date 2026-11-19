@@ -12,8 +12,8 @@ export const MANA_NAMES: Record<ManaId, string> = {
   fire: '火',
   wind: '風',
 };
-/** 【確定】畑が使う4属性 */
-export const FARM_MANA: ManaId[] = ['earth', 'water', 'fire', 'wind'];
+/** 【確定】畑が使うマナは地・火・風の3つ（水は本物の水をやる。水のマナ・白のマナは使わない。2026-11-19 Ronnie） */
+export const FARM_MANA: ManaId[] = ['earth', 'fire', 'wind'];
 
 export type Dir = 'down' | 'up' | 'left' | 'right';
 
@@ -57,7 +57,7 @@ export interface GameState {
     goods: Record<GoodsId, number>;
   };
   plots: Plot[];
-  /** 水。carried は持ち歩いている水（杯）、barrelPure は水くみ場の樽の浄化した水（杯） */
+  /** 水。carried は持ち歩いている水（水やり1回ぶんが1杯）、barrelPure は水くみ場の樽の浄化した水（飲む1回ぶんが1） */
   water: { carried: { river: number; pure: number }; barrelPure: number };
   /** からだの具合（0〜100。大きいほど渇いて・空いている） */
   body: { thirst: number; hunger: number };

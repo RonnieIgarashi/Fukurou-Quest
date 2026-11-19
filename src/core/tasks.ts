@@ -119,11 +119,11 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
       ];
     }
     case 'barrel': {
-      const full = carriedWater(s) >= WATER.CARRY_MAX ? `これ以上は持てない（${WATER.CARRY_MAX}杯まで）` : null;
+      const full = carriedWater(s) >= WATER.CARRY_MAX ? `これ以上は持てない（${WATER.CARRY_MAX}杯ぶんまで）` : null;
       return [
         {
           id: 'drink',
-          label: `水を飲む（きれいな水 樽に${s.water.barrelPure}杯）`,
+          label: `水を飲む（樽のきれいな水 ${s.water.barrelPure}/${WATER.BARREL}）`,
           minutes: TASK_MINUTES.drink,
           disabled: s.water.barrelPure <= 0 ? '樽にきれいな水がない（川の水はそのままでは飲めない）' : null,
         },
@@ -132,13 +132,13 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
           label: '樽の水を浄化する（水のマナ1）',
           minutes: TASK_MINUTES.purify,
           disabled:
-            s.water.barrelPure >= WATER.BARREL_CUPS ? '樽の水はもう浄化してある' : s.inv.mana.water <= 0 ? '水のマナを持っていない' : null,
+            s.water.barrelPure >= WATER.BARREL ? '樽の水はもう浄化してある' : s.inv.mana.water <= 0 ? '水のマナを持っていない' : null,
         },
         {
           id: 'drawPure',
           label: 'きれいな水をくむ',
           minutes: TASK_MINUTES.drawWater,
-          disabled: s.water.barrelPure <= 0 ? '樽にきれいな水がない' : full,
+          disabled: s.water.barrelPure < WATER.WATERING ? '樽のきれいな水が足りない' : full,
         },
         { id: 'drawRiver', label: '川の水をくむ', minutes: TASK_MINUTES.drawWater, disabled: full },
         { id: 'lookBarrel', label: '様子を見る', minutes: 0, disabled: null },
@@ -225,7 +225,7 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     p.watered = 'none';
     p.dry = false;
     p.pureDays = 0;
-    messages.push(`${CROPS[crop].name}の種をまいた。毎日水をやると、次の朝に地・水・火・風のマナを1つずつ使って育つ。（いま ${manaLine(s)}）`);
+    messages.push(`${CROPS[crop].name}の種をまいた。毎日水をやると、次の朝に地・火・風のマナを1つずつ使って育つ。（いま ${manaLine(s)}）`);
   } else if (id === 'harvest' && p && p.crop) {
     const c = CROPS[p.crop];
     const n = harvestYield(p.crop, p.pureDays);
@@ -245,17 +245,17 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     pass(TASK_MINUTES.water);
     messages.push(kind === 'pure' ? 'きれいな水をやった。よく育ちそうだ。' : '川の水をやった。');
   } else if (id === 'drink') {
-    s.water.barrelPure--;
+    s.water.barrelPure -= WATER.DRINK;
     s.body.thirst = 0;
     pass(TASK_MINUTES.drink);
     messages.push('きれいな水を飲んだ。のどがうるおった。');
   } else if (id === 'purify') {
     s.inv.mana.water--;
-    s.water.barrelPure = WATER.BARREL_CUPS;
+    s.water.barrelPure = WATER.BARREL;
     pass(TASK_MINUTES.purify);
-    messages.push(`水のマナを樽に入れた。川の水が澄んで、きれいな水が${WATER.BARREL_CUPS}杯ぶんになった。`);
+    messages.push(`水のマナを樽に入れた。川の水が澄んで、樽いっぱいのきれいな水になった。（飲み水${WATER.BARREL / WATER.DRINK}回・水やり${WATER.BARREL / WATER.WATERING}回ぶん）`);
   } else if (id === 'drawPure') {
-    s.water.barrelPure--;
+    s.water.barrelPure -= WATER.WATERING;
     s.water.carried.pure++;
     pass(TASK_MINUTES.drawWater);
     messages.push(`きれいな水を1杯くんだ。（持っている水 きれい${s.water.carried.pure}・川${s.water.carried.river}）`);
@@ -266,7 +266,7 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
   } else if (id === 'lookBarrel') {
     messages.push(
       s.water.barrelPure > 0
-        ? `樽には、浄化したきれいな水が${s.water.barrelPure}杯ぶん入っている。飲み水にも、畑にも使える。`
+        ? `樽には、浄化したきれいな水が入っている（${s.water.barrelPure}/${WATER.BARREL}）。飲み水にも、畑にも使える。`
         : '水くみ場の水樽だ。川の水がたっぷりたまっている。水のマナで浄化すると、飲み水になる。',
     );
   }

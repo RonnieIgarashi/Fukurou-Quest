@@ -55,13 +55,14 @@ test('一度に進めても、1分ずつ進めても同じ状態になる', () =
 
 // ---------------------------------------------------------------- 畑
 
-test('豆は4属性のマナを毎朝1つずつ使って育ち、収穫できる', () => {
+test('豆は地・火・風のマナを毎朝1つずつ使って育ち（水のマナは使わない）、収穫できる', () => {
   const g = createGame('テスト');
   g.inv.mana.fire = 10;
   const spot = plotSpot(0);
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
   const earth = g.inv.mana.earth;
+  const waterMana = g.inv.mana.water;
   for (let d = 0; d < CROPS.bean.days; d++) {
     g.water.carried.river = 1;
     runTask(g, spot, 'water:river');
@@ -69,13 +70,14 @@ test('豆は4属性のマナを毎朝1つずつ使って育ち、収穫できる
   }
   assert.equal(g.plots[0].stage, 'ready');
   assert.equal(g.inv.mana.earth, earth - CROPS.bean.days);
+  assert.equal(g.inv.mana.water, waterMana);
   const r = runTask(g, spot, 'harvest');
   assert.equal(g.inv.crops.bean, CROPS.bean.yield); // 川の水では収量は増えない
   assert.ok(r.messages[0].includes('収穫'));
   assert.equal(g.plots[0].stage, 'tilled');
 });
 
-test('火のマナが無いと生育が止まる（4属性のどれかが欠けると止まる）', () => {
+test('火のマナが無いと生育が止まる（地・火・風のどれかが欠けると止まる）', () => {
   const g = createGame('テスト');
   assert.equal(g.inv.mana.fire, 0);
   const spot = plotSpot(1);
@@ -121,21 +123,25 @@ test('きれいな水で育てると収量が増え、畑がマナを使った�
   assert.ok(g.inv.crops.bean > CROPS.bean.yield);
 });
 
-test('水くみ場：水のマナ1で樽1杯を浄化し、飲む・くむ。川の水はそのままでは飲めない', () => {
+test('水くみ場：水のマナ1で樽1杯を浄化（飲む20回・水やり10回ぶん）。川の水はそのままでは飲めない', () => {
   const g = createGame('テスト');
   const barrel: Spot = { kind: 'barrel' };
   assert.ok(optionsFor(g, barrel).find((o) => o.id === 'drink')!.disabled);
   const water = g.inv.mana.water;
   runTask(g, barrel, 'purify');
   assert.equal(g.inv.mana.water, water - 1);
-  assert.equal(g.water.barrelPure, WATER.BARREL_CUPS);
+  assert.equal(WATER.BARREL / WATER.DRINK, 20);
+  assert.equal(WATER.BARREL / WATER.WATERING, 10);
+  assert.equal(WATER.BARREL / WATER.COW_DRINK, 10);
   g.body.thirst = 80;
   runTask(g, barrel, 'drink');
   assert.ok(g.body.thirst < 1);
   runTask(g, barrel, 'drawPure');
   runTask(g, barrel, 'drawRiver');
   assert.deepEqual(g.water.carried, { pure: 1, river: 1 });
-  assert.equal(g.water.barrelPure, WATER.BARREL_CUPS - 2);
+  assert.equal(g.water.barrelPure, WATER.BARREL - WATER.DRINK - WATER.WATERING);
+  // 持ち歩けるのは2杯ぶんまで
+  assert.ok(optionsFor(g, barrel).find((o) => o.id === 'drawRiver')!.disabled);
 });
 
 test('のどは時間とともに渇き、眠っている間はゆっくり。走れなくなる境目で知らせる', () => {

@@ -26,7 +26,7 @@ export function momoAsleep(t: number): boolean {
 
 /**
  * 毎朝 6:00 の処理：畑の生育。
- * 前の日に水をやった区画だけが、4属性マナを1つずつ使って1日育つ（水が無い・マナが足りないと止まる）。
+ * 前の日に水をやった区画だけが、地・火・風のマナを1つずつ使って1日育つ（水が無い・マナが足りないと止まる）。
  * きれいな水で育った日は数えておき、収穫のときに収量が増える。水は毎朝やり直し
  */
 function morning(s: GameState, out: GameEvent[]): void {
@@ -61,7 +61,7 @@ function morning(s: GameState, out: GameEvent[]): void {
   if (grew > 0) {
     const used = grew * FARM_MANA_PER_PLOT_PER_DAY;
     const left = FARM_MANA.map((m) => `${MANA_NAMES[m]}${s.inv.mana[m]}`).join(' ');
-    out.push({ kind: 'message', text: `畑の${grew}区画が育った。地・水・火・風のマナを${used}つずつ使った。（のこり ${left}）` });
+    out.push({ kind: 'message', text: `畑の${grew}区画が育った。地・火・風のマナを${used}つずつ使った。（のこり ${left}）` });
   }
   if (dry > 0) out.push({ kind: 'message', text: `水が無く、畑の${dry}区画が育たなかった。毎日、水をやろう。` });
   if (stalled > 0) out.push({ kind: 'message', text: `マナが足りず、畑の${stalled}区画の生育が止まっている。` });
