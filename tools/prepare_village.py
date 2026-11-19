@@ -259,6 +259,137 @@ def shrink_object(base, src, hard, k=SHRINK):
     print(f'  shrink ({x0},{y0})-({x1},{y1}) -> ({nx},{ny})-({nx + small.shape[1]},{y1})')
 
 
+# ---------------------------------------------------------------- 主人公とモクちゃんの家（大きな木の家）
+
+TREEHOUSE = ROOT / 'docs/concept/treehouse.jpg'
+# 作業は元の絵の半分の大きさで行う（村に置くときはさらに縮めるので、細かさは十分）
+TH_HALF = 0.5
+# 上端の見切れを補うために、上に足す余白（元の絵の px）
+TH_PAD = 240
+# 村に置く大きさ（元の絵の px → 村の px）と、はしごの足元を置く位置
+TH_SCALE = 0.17
+TH_FOOT_SRC = (1205, 1700)
+TH_FOOT_VILLAGE = (1015, 655)
+
+# 木と家だけを囲む形（元の絵の px）。まわりの景色（左の森・牧場・右の荒野や鍛冶小屋）は入れない
+TH_POLYS = [
+    # 葉の茂り・幹・根もと
+    [(940, -230), (1840, -230), (1880, 60), (1860, 200), (1800, 280), (1650, 300), (1580, 330), (1580, 600),
+     (1580, 1150), (1600, 1280), (1700, 1330), (1830, 1400), (1860, 1470), (1700, 1505), (1320, 1500),
+     (1320, 1720), (1080, 1720), (1080, 1500), (470, 1490), (470, 1440), (640, 1360), (760, 1260), (850, 1100),
+     (880, 980), (870, 850), (860, 760), (900, 600), (860, 300), (870, 100)],
+    # 右の枝と葉
+    [(1530, 560), (1620, 470), (1660, 380), (1700, 330), (1790, 330), (1800, 380), (1880, 370), (2000, 410),
+     (2070, 440), (2060, 520), (1980, 560), (1900, 585), (1920, 640), (1860, 660), (1780, 640), (1700, 625),
+     (1600, 645), (1545, 700)],
+    # 左上の枝（洗濯ひもの端）
+    [(470, 490), (560, 500), (640, 560), (760, 640), (880, 690), (880, 730), (750, 700), (620, 600), (520, 540), (470, 520)],
+    # 左の枝と、看板・葉
+    [(200, 770), (330, 812), (400, 788), (520, 762), (640, 728), (760, 698), (880, 700), (880, 830), (800, 805),
+     (720, 795), (640, 790), (560, 798), (545, 830), (545, 1050), (360, 1050), (360, 838), (300, 865), (230, 935),
+     (200, 910)],
+    # 洗濯ひもと服
+    [(470, 500), (940, 270), (1180, 260), (1180, 450), (940, 450), (740, 560), (620, 600), (470, 530)],
+]
+
+
+def th_dome(w_half, pad_half, x0, x1):
+    """上端の見切れの上に足す、葉の茂りの丸い形（半分の大きさの座標）。x0〜x1 は元の絵の上端の茂りの幅"""
+    cx, hw, h = (x0 + x1) / 2, (x1 - x0) / 2, 215 * TH_HALF
+    top = np.full(w_half, np.inf)
+    for x in range(w_half):
+        u = (x - cx) / hw
+        if abs(u) < 1:
+            # 葉のかたまりのでこぼこ（幅 30〜40px ほどのふくらみ）
+            bump = 7 * abs(np.sin((x - x0) / 36 * np.pi))
+            top[x] = pad_half - h * (1 - u * u) ** 0.55 - bump * (1 - u * u) ** 0.3
+    return top
+
+
+def build_treehouse():
+    """木の家の絵を、上端を補い、景色を抜いた RGBA にする（半分の大きさ）"""
+    src = Image.open(TREEHOUSE).convert('RGB')
+    src = src.resize((round(src.width * TH_HALF), round(src.height * TH_HALF)), Image.LANCZOS)
+    a = np.asarray(src).astype(np.float32)
+    pad = round(TH_PAD * TH_HALF)
+    h, w = a.shape[:2]
+    img = np.full((h + pad, w, 3), 250.0, np.float32)
+    img[pad:] = a
+    paper = (a.min(axis=2) > 226) & ((a.max(axis=2) - a.min(axis=2)) < 24)
+    # 1. 上端の見切れ：元の絵の上端の茂りを上下に裏返して少し伸ばし、丸い形に描き足す
+    #    （裏返すと、つなぎ目で模様が途切れない。伸ばすのは、枝が入らない上の方だけを使うため）
+    row = np.nonzero(~paper[1])[0]
+    x0, x1 = row.min(), row.max()
+    top = th_dome(w, pad, x0, x1)
+    yy, xx = np.mgrid[0:h + pad, 0:w]
+    dome = (yy >= top[None, :]) & (yy < pad)
+    band = round(80 * TH_HALF)
+    stretch = (215 * TH_HALF + 8) / band
+    for y in range(pad):
+        sy = pad + min(band - 1, int((pad - 1 - y) / stretch))
+        m = dome[y]
+        img[y, m] = img[sy, m]
+    # 裏返した所は、少し明るく（上の葉は光が当たる）
+    lift = np.clip((pad - yy) / max(1, pad), 0, 1)[..., None] * dome[..., None]
+    img = img * (1 - 0.12 * lift) + 255 * 0.12 * lift
+    print('  茂りを描き足した')
+    # 輪郭の墨線（ゆらいだ線で、葉のかたまりの形に）
+    rng = np.random.default_rng(3)
+    ink = np.zeros((h + pad, w), np.float32)
+    for x in range(w):
+        if np.isfinite(top[x]):
+            y = top[x] + rng.normal(0, 0.4)
+            y0 = int(np.floor(y))
+            for dy, k in ((0, 1.0), (1, 0.7), (-1, 0.35)):
+                if 0 <= y0 + dy < h + pad:
+                    ink[y0 + dy, x] = max(ink[y0 + dy, x], k)
+    ink = ndimage.gaussian_filter(ink, 0.6)
+    inkc = np.array([62, 48, 40], np.float32)
+    img = img * (1 - ink[..., None] * 0.85) + inkc * ink[..., None] * 0.85
+    # 2. 形：木と家の範囲の中の、紙でない所（＋描き足した茂り）
+    pm = Image.new('L', (w, h + pad), 0)
+    d = ImageDraw.Draw(pm)
+    for poly in TH_POLYS:
+        d.polygon([(x * TH_HALF, (y + TH_PAD) * TH_HALF) for x, y in poly], fill=255)
+    region = np.asarray(pm) > 0
+    mn = img.min(axis=2)
+    sat = img.max(axis=2) - mn
+    paperish = (mn > 222) & (sat < 26)
+    fg = region & ~paperish
+    # 枝の先の後ろは、淡く描かれた遠くの森。淡い所（明るく色の薄い所）は木ではないので抜く
+    far = np.zeros_like(region)
+    far[:, :round(560 * TH_HALF)] = True
+    far[:round((TH_PAD + 680) * TH_HALF), round(1590 * TH_HALF):] = True
+    fg &= ~(far & (mn > 150) & (sat < 80))
+    fg |= dome | (ink > 0.2)
+    fg = ndimage.binary_closing(fg, iterations=2) & (region | dome | (ink > 0.05))
+    # 線で囲まれたすき間は埋めるが、紙の白い所（枝と洗濯ひもの間など）は抜いたまま
+    fg = ndimage.binary_fill_holes(fg) & ~(paperish & ~dome)
+    fg = ndimage.binary_opening(fg, iterations=1) | dome
+    alpha = ndimage.gaussian_filter(fg.astype(np.float32), 0.7)
+    alpha = np.where(fg, np.maximum(alpha, 0.85), alpha)
+    return np.concatenate([img, alpha[..., None] * 255], axis=2)
+
+
+def place_treehouse(out):
+    """前の小屋を消して、木の家を置く"""
+    print('木の家')
+    # 前の小屋（屋根・煙突・壁）を、まわりの森と草で埋める
+    hole = box_mask(944, 496, 1106, 668)
+    allow = box_mask(860, 430, 1200, 740) & ~dilate(hole, 4)
+    out = inpaint(out, hole, allow, p=11, lam=0.05, seed=11)
+    rgba = build_treehouse()
+    k = TH_SCALE / TH_HALF
+    small = resize_rgba(rgba, k)
+    fx = TH_FOOT_SRC[0] * TH_HALF * k
+    fy = (TH_FOOT_SRC[1] + TH_PAD) * TH_HALF * k
+    x0 = round(TH_FOOT_VILLAGE[0] - fx)
+    y0 = round(TH_FOOT_VILLAGE[1] - fy)
+    print(f'  木の家 {small.shape[1]}x{small.shape[0]} を ({x0},{y0}) に置く')
+    paste_rgba(out, small, x0, y0)
+    return out
+
+
 # ---------------------------------------------------------------- 本体
 
 
@@ -356,6 +487,8 @@ def main():
     out = wash_fill(out, hole, allow, seed=3)
     rgba, _ = rgba_crop(src, body)
     pass  # 同上
+
+    out = place_treehouse(out)
 
     Image.fromarray(np.clip(out, 0, 255).astype(np.uint8)).save(OUT, quality=92)
     print('saved', OUT)

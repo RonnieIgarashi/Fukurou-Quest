@@ -139,9 +139,10 @@ const BRIDGE_GAPS: [number, number][] = [
 
 /** 夜に灯る窓 */
 export const WINDOWS = {
+  // 木の家の入口と、上の小さな見張り小屋
   hut: [
-    { x: 1052, y: 602 },
-    { x: 1086, y: 612 },
+    { x: 1018, y: 582 },
+    { x: 963, y: 470 },
   ],
   forge: { x: 1586, y: 1086 },
 } as const;

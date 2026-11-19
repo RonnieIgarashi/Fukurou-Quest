@@ -57,8 +57,8 @@ interface Sway {
 const SWAYS: Record<string, Sway> = {
   plazaTree: { cx: 1311, cy: 966, rx: 62, ry: 50, pivotY: 1012, amp: 1.6, phase: 0 },
   smithyTree: { cx: 1656, cy: 872, rx: 47, ry: 48, pivotY: 918, amp: 1.3, phase: 1.7 },
-  westTree1: { cx: 828, cy: 488, rx: 38, ry: 54, pivotY: 540, amp: 1.2, phase: 0.6 },
-  westTree2: { cx: 907, cy: 490, rx: 48, ry: 60, pivotY: 552, amp: 1.4, phase: 2.4 },
+  // 主人公とモクちゃんの家（大きな木）の茂り。左の2本の木は、木の家の枝と看板に重なるので揺らさない
+  bigTree: { cx: 1043, cy: 378, rx: 84, ry: 50, pivotY: 425, amp: 1.0, phase: 0.6 },
   orchard1: { cx: 1142, cy: 528, rx: 42, ry: 54, pivotY: 580, amp: 1.1, phase: 1.1 },
   orchard2: { cx: 1220, cy: 538, rx: 44, ry: 54, pivotY: 590, amp: 1.1, phase: 2.9 },
   orchard3: { cx: 1288, cy: 553, rx: 37, ry: 48, pivotY: 600, amp: 1.0, phase: 0.3 },
@@ -766,7 +766,7 @@ function emitLeaves(dt: number, cam: Camera): void {
 
 function emitVillage(dt: number, t: number, forgeBusy: boolean): void {
   // 小屋の煙突の煙（いつも少し出ている。風で右へ流れる）
-  for (let i = EMIT.chimney.count(dt); i > 0; i--) smoke(skyFx, 1018, 511);
+  // （2026-11-19 家を大きな木の家にしたので、煙突の煙は無くなった）
   // 鍛冶小屋：炉が動いているときは屋根から煙
   if (forgeBusy) for (let i = EMIT.smithySmoke.count(dt); i > 0; i--) smoke(skyFx, 1556, 892, 0.8);
 
