@@ -14,7 +14,7 @@ import { optionsFor, runTask } from '../src/core/tasks.js';
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
 const plotSpot = (i: number): Spot => spotAt('village', (PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
 const forgeSpot = (): Spot => spotAt('smithy', 400, 200)!;
-const bedSpot = (): Spot => spotAt('hut', 280, 220)!;
+const bedSpot = (): Spot => spotAt('hut', 560, 470)!;
 
 // ---------------------------------------------------------------- 時計
 
@@ -275,13 +275,13 @@ test('調べられる場所には、すべて説明の台詞がある', () => {
 });
 
 test('室内：小屋はベッド・机・出口、鍛冶小屋は炉・出口', () => {
-  assert.equal(spotAt('hut', 280, 220)?.kind, 'bed');
-  assert.equal(spotAt('hut', 480, 260)?.kind, 'desk');
-  assert.deepEqual(spotAt('hut', 400, 410), { kind: 'exit', id: 'village' });
+  assert.equal(spotAt('hut', 560, 470)?.kind, 'bed');
+  assert.equal(spotAt('hut', 770, 470)?.kind, 'desk');
+  assert.deepEqual(spotAt('hut', 460, 690), { kind: 'exit', id: 'village' });
   assert.equal(spotAt('smithy', 400, 200)?.kind, 'forge');
-  assert.equal(isBlockedAt('hut', 400, 330), false);
-  assert.equal(isBlockedAt('hut', 280, 220), true); // ベッド
-  assert.equal(isBlockedAt('hut', 100, 300), true); // 壁の外
+  assert.equal(isBlockedAt('hut', 560, 505), false);
+  assert.equal(isBlockedAt('hut', 560, 400), true); // ベッド
+  assert.equal(isBlockedAt('hut', 100, 400), true); // 壁の外
 });
 
 test('村：小屋の前・畑の中・浜辺・慰霊碑の前は歩け、川・噴水・森・畑の柵・石垣は通れない', () => {

@@ -1126,11 +1126,11 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
       ctx.globalCompositeOperation = 'multiply';
       const k = 1 - 0.45 * dark;
       ctx.fillStyle = `rgb(${Math.round(255 * k)}, ${Math.round(235 * k)}, ${Math.round(220 * k)})`;
-      ctx.fillRect(0, 0, 800, 450);
+      ctx.fillRect(0, 0, AREAS[area].w, AREAS[area].h);
       ctx.globalCompositeOperation = 'source-over';
     }
     ctx.globalCompositeOperation = 'lighter';
-    if (area === 'hut') glow(ctx, 505, 228, 70, 'rgba(255, 190, 110, A)', 0.15 + 0.3 * dark + 0.03 * Math.sin(t * 9));
+    if (area === 'hut') glow(ctx, 496, 112, 110, 'rgba(255, 190, 110, A)', 0.15 + 0.3 * dark + 0.03 * Math.sin(t * 9));
     if (area === 'smithy') {
       const f = forgeBusy ? 0.55 + 0.08 * Math.sin(t * 7) : 0.12;
       glow(ctx, SMITHY_FIRE.x, SMITHY_FIRE.y, forgeBusy ? 120 : 50, 'rgba(255, 120, 40, A)', f);

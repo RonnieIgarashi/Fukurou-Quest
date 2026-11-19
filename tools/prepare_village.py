@@ -267,7 +267,7 @@ TH_HALF = 0.5
 # 上端の見切れを補うために、上に足す余白（元の絵の px）
 TH_PAD = 240
 # 村に置く大きさ（元の絵の px → 村の px）と、はしごの足元を置く位置
-TH_SCALE = 0.17
+TH_SCALE = 0.12  # 2026-11-19 Ronnie「微妙に大きい」→ 0.17 から小さく
 TH_FOOT_SRC = (1205, 1700)
 TH_FOOT_VILLAGE = (1015, 655)
 
@@ -368,16 +368,37 @@ def build_treehouse():
     fg = ndimage.binary_opening(fg, iterations=1) | dome
     alpha = ndimage.gaussian_filter(fg.astype(np.float32), 0.7)
     alpha = np.where(fg, np.maximum(alpha, 0.85), alpha)
-    return np.concatenate([img, alpha[..., None] * 255], axis=2)
+    # 3. 地面との境目：根もとの下の端を、でこぼこにして少しずつ透かす（直線で切れて浮いて見えないように）
+    rng2 = np.random.default_rng(5)
+    base = (1470 + TH_PAD) * TH_HALF
+    noise = ndimage.gaussian_filter1d(rng2.normal(0, 1, w), 6) * 10 * TH_HALF / 0.5
+    ladder = (xx >= 1075 * TH_HALF) & (xx <= 1325 * TH_HALF)
+    ramp = np.clip((base + noise[None, :] + 22 * TH_HALF - yy) / (40 * TH_HALF), 0, 1)
+    alpha = np.where(ladder, alpha, alpha * ramp)
+    # はしごの足も、地面に少し埋める
+    lbase = (1690 + TH_PAD) * TH_HALF
+    alpha = np.where(ladder, alpha * np.clip((lbase - yy) / (14 * TH_HALF), 0, 1), alpha)
+    # 4. 色合いを村の絵に寄せる（彩度とコントラストを少し落とし、少し温かく）
+    g = img.mean(axis=2, keepdims=True)
+    img = g + (img - g) * 0.85
+    img = 128 + (img - 128) * 0.92
+    img = img * np.array([1.02, 1.0, 0.95], np.float32)
+    return np.concatenate([np.clip(img, 0, 255), alpha[..., None] * 255], axis=2)
 
 
 def place_treehouse(out):
     """前の小屋を消して、木の家を置く"""
     print('木の家')
     # 前の小屋（屋根・煙突・壁）を、まわりの森と草で埋める
-    hole = box_mask(944, 496, 1106, 668)
-    allow = box_mask(860, 430, 1200, 740) & ~dilate(hole, 4)
-    out = inpaint(out, hole, allow, p=11, lam=0.05, seed=11)
+    # 小屋の形だけを消す（広く消すと、継ぎ当ての跡が木の家のまわりに見えてしまう）
+    hole = poly_mask([
+        [(968, 562), (990, 512), (1098, 512), (1112, 562)],  # 屋根
+        [(974, 556), (1106, 556), (1106, 666), (974, 666)],  # 壁
+        [(1000, 500), (1034, 500), (1034, 540), (1000, 540)],  # 煙突
+    ])
+    hole = dilate(hole, 3)
+    allow = box_mask(880, 440, 1200, 720) & ~dilate(hole, 6)
+    out = inpaint(out, hole, allow, p=15, lam=0.02, seed=11)
     rgba = build_treehouse()
     k = TH_SCALE / TH_HALF
     small = resize_rgba(rgba, k)
@@ -386,6 +407,12 @@ def place_treehouse(out):
     x0 = round(TH_FOOT_VILLAGE[0] - fx)
     y0 = round(TH_FOOT_VILLAGE[1] - fy)
     print(f'  木の家 {small.shape[1]}x{small.shape[0]} を ({x0},{y0}) に置く')
+    # 足元に、やわらかい影を落としてから置く（地面とつながって見えるように）
+    fxv, fyv = TH_FOOT_VILLAGE
+    ry, rx = np.mgrid[0:H, 0:W]
+    d = ((rx - fxv) / (0.62 * small.shape[1] * 0.5)) ** 2 + ((ry - (fyv - 9)) / 13) ** 2
+    shade = np.clip(1 - d, 0, 1) ** 1.5 * 0.32
+    out = out * (1 - shade[..., None]) + np.array([40, 52, 30], np.float32) * shade[..., None]
     paste_rgba(out, small, x0, y0)
     return out
 

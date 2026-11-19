@@ -509,23 +509,43 @@ const VILLAGE: Area = {
 /** 室内の部屋の床（歩ける範囲）。仮の絵もこれに合わせて描く */
 export const ROOM = { x0: 220, y0: 190, x1: 580, y1: 392 } as const;
 
+/**
+ * 木の家の中（Ronnie の絵 docs/concept/hut_interior.jpg を tools/prepare_interior.py で 1000x747 にしたもの）。
+ * 床：階段の右から、ベッド・机の手前まで。手前は敷物（出口）まで
+ */
 const HUT: Area = {
-  w: 800,
-  h: 450,
-  image: null,
-  walkable: [rect(ROOM.x0, ROOM.y0, ROOM.x1, ROOM.y1), rect(378, 380, 422, 412)],
+  w: 1000,
+  h: 747,
+  image: 'assets/maps/hut.jpg',
+  walkable: [
+    [
+      [330, 500],
+      [460, 466],
+      [640, 460],
+      [730, 472],
+      [800, 480],
+      [800, 600],
+      [760, 640],
+      [640, 680],
+      [560, 705],
+      [420, 705],
+      [330, 662],
+      [300, 600],
+      [300, 520],
+    ],
+  ],
   blocked: [
-    rect(226, 180, 330, 262), // ベッド
-    rect(436, 238, 530, 280), // 机
-    rect(540, 180, 580, 236), // モクちゃんの止まり木
+    rect(520, 565, 675, 615), // 丸いテーブル
+    rect(465, 545, 522, 590), // いす
+    rect(655, 590, 712, 625), // 丸いすの
   ],
   open: [],
   spots: [
-    { spot: { kind: 'exit', id: 'village' }, poly: rect(372, 396, 428, 430) },
-    { spot: { kind: 'bed' }, poly: rect(220, 170, 336, 272) },
-    { spot: { kind: 'desk' }, poly: rect(430, 226, 536, 290) },
-    { spot: { kind: 'look', id: 'hutWindow' }, poly: rect(360, 120, 440, 200) },
-    { spot: { kind: 'look', id: 'perch' }, poly: rect(534, 170, 584, 246) },
+    { spot: { kind: 'exit', id: 'village' }, poly: rect(380, 668, 545, 720) },
+    { spot: { kind: 'bed' }, poly: rect(470, 420, 640, 492) },
+    { spot: { kind: 'desk' }, poly: rect(728, 420, 830, 502) },
+    { spot: { kind: 'look', id: 'hutStairs' }, poly: rect(270, 420, 330, 600) },
+    { spot: { kind: 'look', id: 'hutTable' }, poly: rect(510, 540, 690, 640) },
   ],
   occluders: [],
 };
@@ -560,7 +580,7 @@ export const HOME = { x: 1015, y: 668 } as const;
 /** 各エリアに入ったときの位置（village はどの建物から出たかで決まる） */
 export const ENTRANCES: Record<AreaId, { x: number; y: number }> = {
   village: HOME,
-  hut: { x: 400, y: 378 },
+  hut: { x: 462, y: 652 },
   smithy: { x: 400, y: 378 },
 };
 export const EXIT_TO_VILLAGE: Record<Exclude<AreaId, 'village'>, { x: number; y: number }> = {
@@ -569,12 +589,12 @@ export const EXIT_TO_VILLAGE: Record<Exclude<AreaId, 'village'>, { x: number; y:
 };
 
 /** 朝に目覚める場所（小屋の中、ベッドの横） */
-export const WAKE = { area: 'hut' as AreaId, x: 300, y: 300 };
+export const WAKE = { area: 'hut' as AreaId, x: 560, y: 505 };
 
 /** 仲間の寝床（小屋の中） */
 export const BEDS = {
-  moku: { area: 'hut' as AreaId, x: 560, y: 238 },
-  momo: { area: 'hut' as AreaId, x: 250, y: 360 },
+  moku: { area: 'hut' as AreaId, x: 600, y: 206 }, // ロフトのわらの寝床
+  momo: { area: 'hut' as AreaId, x: 712, y: 340 }, // 樽の上
 } as const;
 
 // ================================================================ 問い合わせ

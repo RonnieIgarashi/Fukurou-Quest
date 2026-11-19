@@ -73,6 +73,11 @@ export const LOOK: Record<string, Line[]> = {
   river: [{ speaker: 'player', text: '澄んだ川だ。水のマナがあれば、飲み水にできるかもしれない。' }],
   hutWindow: [{ speaker: 'player', text: '窓から村の広場が見える。' }],
   perch: [{ speaker: 'moku', text: 'ここ、ぼくの止まり木！ 夜はここで寝るんだ。' }],
+  hutStairs: [
+    { speaker: 'player', text: '上の見張り小屋へ続く階段だ。' },
+    { speaker: 'narration', text: '（上の階の絵ができたら行けるようになります）' },
+  ],
+  hutTable: [{ speaker: 'moku', text: 'ここでいっしょにごはんを食べようね。上のわらのベッドは、ぼくの寝床なんだ。' }],
   anvil: [{ speaker: 'player', text: '古い金床だ。武器の錬成は、工房ができてからだな。' }],
   woodpile: [{ speaker: 'player', text: '薪が積んである。炉にくべる燃料だ。' }],
 };
