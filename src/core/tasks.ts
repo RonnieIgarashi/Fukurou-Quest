@@ -1,9 +1,9 @@
 // タスク（行動）。実行すると効果を反映し、所要時間ぶん advance() で時間をまとめて進める。
 import { formatClock, minuteOfDay } from './clock.js';
 import { Spot } from './map.js';
-import { CropId, CROPS, FORGE, FUELS, GOODS, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
+import { CropId, CROPS, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
 import { advance, GameEvent, sleepUntilMorning } from './sim.js';
-import { FARM_MANA, GameState, MANA_NAMES } from './state.js';
+import { FARM_MANA, GameState, MANA_IDS, MANA_NAMES } from './state.js';
 
 export interface TaskOption {
   id: string;
@@ -269,6 +269,91 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
         ? `樽には、浄化したきれいな水が入っている（${s.water.barrelPure}/${WATER.BARREL}）。飲み水にも、畑にも使える。`
         : '水くみ場の水樽だ。川の水がたっぷりたまっている。水のマナで浄化すると、飲み水になる。',
     );
+  }
+  return { messages, events, minutes: s.clock - before };
+}
+
+
+// ---------------------------------------------------------------- 持ち物（選んで使う。2026-11-20 Ronnie）
+
+export interface ItemAction {
+  id: string;
+  label: string;
+  /** 使えない理由（使えるなら null） */
+  disabled: string | null;
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  count: string;
+  actions: ItemAction[];
+}
+
+/** 持ち物の一覧（持っているものだけ）。選ぶと、その物でできることが出る */
+export function inventoryItems(s: GameState): InventoryItem[] {
+  const items: InventoryItem[] = [];
+  const none = (why: string): ItemAction[] => [{ id: 'none', label: '使う', disabled: why }];
+  if (s.water.carried.pure > 0)
+    items.push({
+      id: 'water:pure',
+      name: 'きれいな水',
+      count: `${s.water.carried.pure}杯`,
+      actions: [
+        { id: 'drink', label: '飲む', disabled: null },
+        { id: 'none', label: '畑にやる', disabled: '畑を調べて「水をやる」を選ぶ' },
+      ],
+    });
+  if (s.water.carried.river > 0)
+    items.push({
+      id: 'water:river',
+      name: '川の水',
+      count: `${s.water.carried.river}杯`,
+      actions: [
+        { id: 'none', label: '飲む', disabled: '川の水はそのままでは飲めない（水くみ場で浄化する）' },
+        { id: 'none', label: '畑にやる', disabled: '畑を調べて「水をやる」を選ぶ' },
+      ],
+    });
+  for (const c of Object.keys(CROPS) as CropId[]) {
+    if (s.inv.seeds[c] > 0)
+      items.push({ id: `seed:${c}`, name: `${CROPS[c].name}の種`, count: `${s.inv.seeds[c]}`, actions: none('耕した畑を調べると、まける') });
+  }
+  for (const c of Object.keys(CROPS) as CropId[]) {
+    if (s.inv.crops[c] > 0)
+      items.push({ id: `crop:${c}`, name: CROPS[c].name, count: `${s.inv.crops[c]}`, actions: none('まだ使い道がない（料理やウシのえさは準備中）') });
+  }
+  for (const g of Object.keys(GOODS) as GoodsId[]) {
+    if (s.inv.goods[g] > 0)
+      items.push({
+        id: `goods:${g}`,
+        name: GOODS[g].name,
+        count: `${s.inv.goods[g]}`,
+        actions: none(FUELS.includes(g) ? '鍛冶小屋の炉で燃料に使う' : 'まだ使い道がない'),
+      });
+  }
+  items.push({
+    id: 'mana',
+    name: 'マナ',
+    count: MANA_IDS.map((m) => `${MANA_NAMES[m]}${s.inv.mana[m]}`).join(' '),
+    actions: none('畑・炉・水くみ場で使う'),
+  });
+  return items;
+}
+
+/** 持ち物を使う */
+export function runItemAction(s: GameState, itemId: string, actionId: string): TaskResult {
+  const item = inventoryItems(s).find((i) => i.id === itemId);
+  const act = item?.actions.find((a) => a.id === actionId);
+  if (!item || !act) return { messages: [], events: [], minutes: 0 };
+  if (act.disabled) return { messages: [act.disabled], events: [], minutes: 0 };
+  const before = s.clock;
+  let events: GameEvent[] = [];
+  const messages: string[] = [];
+  if (itemId === 'water:pure' && actionId === 'drink') {
+    s.water.carried.pure--;
+    s.body.thirst = 0;
+    events = advance(s, TASK_MINUTES.drink);
+    messages.push('持っていたきれいな水を飲んだ。のどがうるおった。');
   }
   return { messages, events, minutes: s.clock - before };
 }

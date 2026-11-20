@@ -9,7 +9,7 @@ import { migrate, newSaveFile, SAVE_SCHEMA } from '../src/core/save/schema.js';
 import { advance, checkBedtime, mokuAsleep, momoAsleep, sleepUntilMorning } from '../src/core/sim.js';
 import { createGame } from '../src/core/state.js';
 import { LOOK } from '../src/core/story.js';
-import { optionsFor, runTask } from '../src/core/tasks.js';
+import { inventoryItems, optionsFor, runItemAction, runTask } from '../src/core/tasks.js';
 
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
 const plotSpot = (i: number): Spot => spotAt('village', (PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
@@ -146,7 +146,10 @@ test('水くみ場：水のマナ1で樽1杯を浄化（飲む20回・水やり1
 
 test('のどは時間とともに渇き、眠っている間はゆっくり。走れなくなる境目で知らせる', () => {
   const g = createGame('テスト');
-  const ev = advance(g, 12 * 60);
+  // 1日1回飲めば足りる：朝に飲んでから夜の22時まで（16時間）は走れる
+  advance(g, 16 * 60);
+  assert.ok(g.body.thirst < BODY.THIRST_NO_RUN);
+  const ev = advance(g, 10 * 60);
   assert.ok(g.body.thirst >= BODY.THIRST_NO_RUN);
   assert.ok(g.body.hunger > 0);
   assert.ok(ev.some((e) => e.kind === 'message' && e.text.includes('走れない')));
@@ -155,6 +158,19 @@ test('のどは時間とともに渇き、眠っている間はゆっくり。�
   const before = h.body.thirst;
   sleepUntilMorning(h);
   assert.ok(h.body.thirst - before < BODY.THIRST_PER_HOUR * 9 * 0.5);
+});
+
+test('持ち物：きれいな水を選んで飲める。川の水は飲めない', () => {
+  const g = createGame('テスト');
+  g.water.carried = { pure: 1, river: 1 };
+  g.body.thirst = 80;
+  const items = inventoryItems(g);
+  const river = items.find((i) => i.id === 'water:river')!;
+  assert.ok(river.actions.find((a) => a.label === '飲む')!.disabled);
+  runItemAction(g, 'water:pure', 'drink');
+  assert.ok(g.body.thirst < 1);
+  assert.equal(g.water.carried.pure, 0);
+  assert.ok(!inventoryItems(g).some((i) => i.id === 'water:pure'));
 });
 
 // ---------------------------------------------------------------- 炉

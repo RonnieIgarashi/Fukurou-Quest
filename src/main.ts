@@ -1,15 +1,15 @@
 // 起動と画面の切り替え（タイトル → セーブ枠 → 名前入力 → ムービー → フィールド）。
 import { dayOf, formatClock, hourFloat, START_TIME } from './core/clock.js';
-import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, isBlockedAt, nearestFree, Spot, spotAt } from './core/map.js';
+import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, charScale, isBlockedAt, nearestFree, Spot, spotAt } from './core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from './core/names.js';
-import { BODY, CROPS, CropId, GOODS, GoodsId, NAME_MAX, TIME, WATER } from './core/params.js';
+import { BODY, NAME_MAX, TIME, WATER } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
 import { newSaveFile } from './core/save/schema.js';
 import { SaveStore, SaveSummary } from './core/save/store.js';
 import { advance, checkBedtime, GameEvent, mokuAsleep, momoAsleep } from './core/sim.js';
-import { createGame, Dir, GameState, MANA_IDS, MANA_NAMES, ManaId } from './core/state.js';
+import { createGame, Dir, GameState, MANA_IDS, ManaId } from './core/state.js';
 import { fillName, Line, LOOK, Speaker, STORY, STORY_MOVIE, StoryId } from './core/story.js';
-import { optionsFor, runTask, TaskOption } from './core/tasks.js';
+import { inventoryItems, optionsFor, runItemAction, runTask, TaskOption } from './core/tasks.js';
 import { clearInput, endFrame, initInput, isHeld, wasPressed } from './input.js';
 import { BASE_H, BASE_W, Ctx, spriteImage, VIEW_W } from './view/gfx.js';
 import { movieExists, playMovie, portrait, preloadPortraits } from './view/media.js';
@@ -281,7 +281,7 @@ let holdAfterDialog = false;
 type Menu =
   | { kind: 'task'; spot: Spot; options: TaskOption[]; idx: number }
   | { kind: 'main'; idx: number }
-  | { kind: 'items' }
+  | { kind: 'items'; idx: number; act: number | null }
   | { kind: 'party' };
 let menu: Menu | null = null;
 
@@ -377,12 +377,13 @@ const RUN_SPEED = 280;
 const DIRS: Record<Dir, [number, number]> = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] };
 
 function blockedAt(x: number, y: number): boolean {
-  // 足元の小さな四角（幅16・高さ6）で当たりを取る
+  // 足元の小さな四角（幅16・高さ6。家の中では人物が大きいので広げる）で当たりを取る
+  const cs = charScale(game.player.area);
   const pts = [
-    [x - 8, y - 6],
-    [x + 8, y - 6],
-    [x - 8, y],
-    [x + 8, y],
+    [x - 8 * cs, y - 6 * cs],
+    [x + 8 * cs, y - 6 * cs],
+    [x - 8 * cs, y],
+    [x + 8 * cs, y],
   ];
   return pts.some(([px, py]) => isBlockedAt(game.player.area, px, py));
 }
@@ -507,7 +508,8 @@ function frontSpot(): Spot | null {
   const p = game.player;
   const [dx, dy] = DIRS[p.dir];
   const fy = p.y - 3;
-  return spotAt(p.area, p.x + dx * 18, fy + dy * 18) ?? spotAt(p.area, p.x, fy);
+  const k = 18 * charScale(p.area);
+  return spotAt(p.area, p.x + dx * k, fy + dy * k) ?? spotAt(p.area, p.x, fy);
 }
 
 const TALK: Record<'moku' | 'momo', { awake: string[]; asleep: string[] }> = {
@@ -524,11 +526,12 @@ const TALK: Record<'moku' | 'momo', { awake: string[]; asleep: string[] }> = {
 function talkTarget(): 'moku' | 'momo' | null {
   const p = game.player;
   const [dx, dy] = DIRS[p.dir];
-  const fx = p.x + dx * 16;
-  const fy = p.y + dy * 16;
+  const ks = charScale(p.area);
+  const fx = p.x + dx * 16 * ks;
+  const fy = p.y + dy * 16 * ks;
   for (const k of ['moku', 'momo'] as const) {
     const c = game.companions[k];
-    if (c.met && c.area === p.area && Math.hypot(c.x - fx, c.y - fy) < 22) return k;
+    if (c.met && c.area === p.area && Math.hypot(c.x - fx, c.y - fy) < 22 * ks) return k;
   }
   return null;
 }
@@ -696,10 +699,11 @@ const MAIN_ITEMS = ['もちもの', 'なかま', 'セーブ', 'もじ', 'タイ�
 
 function updateMenu(): void {
   if (!menu) return;
-  if (menu.kind === 'items' || menu.kind === 'party') {
-    if (wasPressed('ok', 'cancel', 'menu')) menu = { kind: 'main', idx: menu.kind === 'items' ? 0 : 1 };
+  if (menu.kind === 'party') {
+    if (wasPressed('ok', 'cancel', 'menu')) menu = { kind: 'main', idx: 1 };
     return;
   }
+  if (menu.kind === 'items') return updateItems(menu);
   const n = menu.kind === 'task' ? menu.options.length : MAIN_ITEMS.length;
   if (wasPressed('up')) menu.idx = (menu.idx + n - 1) % n;
   if (wasPressed('down')) menu.idx = (menu.idx + 1) % n;
@@ -713,7 +717,7 @@ function updateMenu(): void {
     return;
   }
   const item = MAIN_ITEMS[menu.idx];
-  if (item === 'もちもの') menu = { kind: 'items' };
+  if (item === 'もちもの') menu = { kind: 'items', idx: 0, act: null };
   else if (item === 'なかま') menu = { kind: 'party' };
   else if (item === 'もじ') toggleKana();
   else if (item === 'セーブ') {
@@ -724,6 +728,37 @@ function updateMenu(): void {
     menu = null;
     go('title');
   } else menu = null;
+}
+
+/** 持ち物：上下で選び、Z でその物でできること（飲む など）を出す。X でもどる */
+function updateItems(m: Extract<Menu, { kind: 'items' }>): void {
+  const items = inventoryItems(game);
+  m.idx = Math.min(m.idx, items.length - 1);
+  const it = items[m.idx];
+  if (m.act === null) {
+    if (wasPressed('up')) m.idx = (m.idx + items.length - 1) % items.length;
+    if (wasPressed('down')) m.idx = (m.idx + 1) % items.length;
+    if (wasPressed('cancel', 'menu')) menu = { kind: 'main', idx: 0 };
+    else if (wasPressed('ok') && it) m.act = 0;
+    return;
+  }
+  const n = it.actions.length;
+  if (wasPressed('up')) m.act = (m.act + n - 1) % n;
+  if (wasPressed('down')) m.act = (m.act + 1) % n;
+  if (wasPressed('cancel', 'menu')) {
+    m.act = null;
+    return;
+  }
+  if (!wasPressed('ok')) return;
+  const a = it.actions[m.act];
+  if (a.disabled) {
+    toast(a.disabled);
+    return;
+  }
+  const res = runItemAction(game, it.id, a.id);
+  menu = null;
+  handleEvents(res.events);
+  narrate(res.messages);
 }
 
 // ---------------------------------------------------------------- フィールド：描画
@@ -933,18 +968,37 @@ function drawMenu(ctx: Ctx): void {
     screen.text(BASE_W - 80, 53 + i * 16, label === 'もじ' ? kanaLabel() : label, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
   });
   if (menu.kind === 'items') {
-    drawFrame(ctx, 40, 46, 250, 148);
+    // 持ち物の一覧（選べる）。レイアウトは仮（Ronnie がメニュー画面の絵を用意する）
+    const m = menu;
+    const items = inventoryItems(game);
+    const h = 26 + items.length * 14 + 14;
+    drawFrame(ctx, 40, 46, 250, h);
     screen.text(52, 52, 'もちもの', { size: 11, color: '#ffe066' });
-    const crops = Object.keys(CROPS) as CropId[];
-    const rows = [
-      ...crops.map((c) => `${CROPS[c].name}の種　${game.inv.seeds[c]}`),
-      ...crops.map((c) => `${CROPS[c].name}　${game.inv.crops[c]}`),
-      `マナ　${MANA_IDS.map((m) => `${MANA_NAMES[m]}${game.inv.mana[m]}`).join('　')}`,
-      `素材　${(Object.keys(GOODS) as GoodsId[]).map((g) => `${GOODS[g].name}${game.inv.goods[g]}`).join('　')}`,
-      `炉　変化中${game.forge.queue.length}・取り出せる火${game.forge.ready}`,
-      `水　きれい${game.water.carried.pure}・川${game.water.carried.river}（樽のきれいな水 ${game.water.barrelPure}/${WATER.BARREL}）`,
-    ];
-    rows.forEach((r, i) => screen.text(52, 68 + i * 14, r, { size: 10 }));
+    items.forEach((it, i) => {
+      const y = 68 + i * 14;
+      const sel = i === m.idx;
+      if (sel && m.act === null) drawCursor(ctx, 46, y + 3, t);
+      screen.text(56, y, it.name, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
+      screen.text(280, y, it.count, { size: 10, align: 'right', color: '#b8b0e0' });
+    });
+    screen.text(52, 68 + items.length * 14 + 2, `炉 変化中${game.forge.queue.length}・取り出せる火${game.forge.ready}　樽のきれいな水 ${game.water.barrelPure}/${WATER.BARREL}`, {
+      size: 8,
+      color: '#8a84b0',
+    });
+    const it = items[m.idx];
+    if (m.act !== null && it) {
+      const y0 = 68 + m.idx * 14;
+      const w = 96;
+      // 持ち物の数を隠さないよう、一覧の枠の右に出す
+      drawFrame(ctx, 292, y0 - 4, w - 10, 12 + it.actions.length * 14);
+      it.actions.forEach((a, i) => {
+        const sel = i === m.act;
+        if (sel) drawCursor(ctx, 298, y0 + 3 + i * 14, t);
+        screen.text(308, y0 + i * 14, a.label, { size: 10, color: a.disabled ? '#7a74a0' : sel ? '#ffe066' : '#f4f0ff' });
+      });
+      const a = it.actions[m.act];
+      if (a?.disabled) screen.text(52, y0 + 12 + it.actions.length * 14 + 4, a.disabled, { size: 9, color: '#ffb0b0' });
+    }
   }
   if (menu.kind === 'party') {
     drawFrame(ctx, 40, 46, 230, 84);
@@ -998,7 +1052,7 @@ function drawField(ctx: Ctx): void {
     const cam = cameraFor(game);
     const k = BASE_W / (VIEW_W * currentZoom());
     const cx = Math.round((game.player.x - cam.x) * k);
-    const cy = Math.round((game.player.y - cam.y - 66) * k);
+    const cy = Math.round((game.player.y - cam.y - 66 * charScale(game.player.area)) * k);
     drawFrame(ctx, cx - 10, cy - 12, 20, 12, 0.85);
     screen.text(cx, cy - 11, '！', { size: 9, align: 'center', color: '#ffe066' });
   }

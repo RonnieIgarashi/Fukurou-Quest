@@ -1,11 +1,11 @@
 // フィールドの描画：背景の絵 → 水の動き・畑 → 物と人物（足元の y で前後を決める。絵の建物や木は切り抜きを手前に重ねる）
 // → 時刻の光 → 周辺減光。座標はエリアの絵の px（ワールド単位）。画面には 800x450 の範囲を映す。
 import { hourFloat } from '../core/clock.js';
-import { AreaId, AREAS, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
+import { AreaId, AREAS, charScale, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
 import { CROPS, CropId } from '../core/params.js';
 import { mokuAsleep, momoAsleep } from '../core/sim.js';
 import { Companion, Dir, GameState, Plot } from '../core/state.js';
-import { Ctx, drawAtFeet, drawShadow, makeCanvas, rng, spriteImage, VIEW_H, VIEW_W } from './gfx.js';
+import { Ctx, drawAtFeet, drawShadow, makeCanvas, rng, SPRITE_SCALE, spriteImage, VIEW_H, VIEW_W } from './gfx.js';
 import { interiorImage, SMITHY_FIRE } from './interior.js';
 import { art as spriteArt, companionPose, COMPANION_BODY, COMPANION_SCALE, drawArtAtCenter, COW_SCALE, cowPose, drawArtAtFeet, LEAF_COUNT } from './art.js';
 import { Emitter, Particles, rand, smoke } from './particles.js';
@@ -908,12 +908,13 @@ const lastPos: Partial<Record<'moku' | 'momo', { x: number; y: number }>> = {};
 
 function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean, t: number): Drawable {
   // 飛べる2匹なので、起きているときはふわふわ浮く（ゆっくり、小さく）
-  const float = asleep ? 0 : Math.sin(t * 2.2 + (kind === 'moku' ? 0 : 2)) * 1.5 - (kind === 'momo' ? 12 : 3);
+  const cs = charScale(c.area);
+  const float = (asleep ? 0 : Math.sin(t * 2.2 + (kind === 'moku' ? 0 : 2)) * 1.5 - (kind === 'momo' ? 12 : 3)) * cs;
   return {
     y: c.y,
     x: c.x,
     draw: (ctx) => {
-      drawShadow(ctx, c.x, c.y, asleep ? 26 : 20);
+      drawShadow(ctx, c.x, c.y, (asleep ? 26 : 20) * cs);
       // Ronnie の素材の絵（向き4つ×羽ばたき）。ももっちゅは飛んでいるのでいつも速く羽ばたき、
       // モクちゃんは動いているときと、ときどき羽ばたく
       const moving = Math.hypot(c.x - (lastPos[kind]?.x ?? c.x), c.y - (lastPos[kind]?.y ?? c.y)) > 0.05;
@@ -925,19 +926,19 @@ function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean,
       if (img) {
         // 眠っているときは正面の絵を少しつぶし、ゆっくり呼吸させる
         const squash = asleep ? 0.9 + Math.sin(t * 1.6) * 0.015 : 1 + Math.sin(t * 2.4 + (kind === 'moku' ? 0 : 1)) * 0.01;
-        if (asleep) drawArtAtFeet(ctx, img, c.x, c.y + 1, COMPANION_SCALE[kind], pose.mirror, squash);
+        if (asleep) drawArtAtFeet(ctx, img, c.x, c.y + 1, COMPANION_SCALE[kind] * cs, pose.mirror, squash);
         // 起きているときは、羽ばたいても体の位置が変わらないよう重心でそろえる
-        else drawArtAtCenter(ctx, pose.name, img, c.x, c.y + float + 1 - COMPANION_BODY[kind], COMPANION_SCALE[kind], pose.mirror, squash);
+        else drawArtAtCenter(ctx, pose.name, img, c.x, c.y + float + 1 - COMPANION_BODY[kind] * cs, COMPANION_SCALE[kind] * cs, pose.mirror, squash);
       } else {
         const frames = kind === 'moku' ? MOKU : MOMO;
         const def = asleep ? frames.sleep : flap ? (kind === 'moku' ? MOKU.hop : MOMO.flap) : frames.idle;
-        drawAtFeet(ctx, def, c.x, c.y + float + 1, c.dir === 'left');
+        drawAtFeet(ctx, def, c.x, c.y + float + 1, c.dir === 'left', SPRITE_SCALE * cs);
       }
       if (asleep) {
         const z = Math.floor(t * 1.5) % 3;
         ctx.globalAlpha = 0.85;
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(spriteImage(ZZZ), c.x + 10 + z * 2, c.y - 46 - z * 5, 7, 7);
+        ctx.drawImage(spriteImage(ZZZ), c.x + (10 + z * 2) * cs, c.y - (46 + z * 5) * cs, 7 * cs, 7 * cs);
         ctx.imageSmoothingEnabled = true;
         ctx.globalAlpha = 1;
       }
@@ -1051,8 +1052,9 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
     y: p.y,
     x: p.x,
     draw: (c) => {
-      drawShadow(c, p.x, p.y, 30);
-      drawAtFeet(c, PLAYER[facing][step], p.x, p.y + 2, p.dir === 'left');
+      const ps = charScale(p.area);
+      drawShadow(c, p.x, p.y, 30 * ps);
+      drawAtFeet(c, PLAYER[facing][step], p.x, p.y + 2 * ps, p.dir === 'left', SPRITE_SCALE * ps);
     },
   });
 
