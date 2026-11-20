@@ -1053,9 +1053,14 @@ function drawField(ctx: Ctx): void {
     const cam = cameraFor(game);
     const k = BASE_W / (VIEW_W * currentZoom());
     const cx = Math.round((game.player.x - cam.x) * k);
-    const cy = Math.round((game.player.y - cam.y - 66 * charScaleAt(game.player.area, game.player.y)) * k);
-    drawFrame(ctx, cx - 10, cy - 12, 20, 12, 0.85);
-    screen.text(cx, cy - 11, '！', { size: 9, align: 'center', color: '#ffe066' });
+    const ps = charScaleAt(game.player.area, game.player.y);
+    const cy = Math.round((game.player.y - cam.y - 66 * ps) * k);
+    // 案内の大きさも、画面の上での人物の大きさに合わせる（引いて見たとき・森の奥では小さく。2026-11-20 Ronnie）
+    const b = Math.max(0.45, Math.min(1.2, ps / currentZoom()));
+    const w = Math.round(20 * b);
+    const h = Math.round(12 * b);
+    drawFrame(ctx, cx - w / 2, cy - h, w, h, 0.85);
+    screen.text(cx, cy - h + b, '！', { size: 9 * b, align: 'center', color: '#ffe066' });
   }
 
   if (busy) {
