@@ -32,6 +32,7 @@ export const TASK_MINUTES = {
   purify: 20, // 樽の水を浄化する
   drink: 5, // 水を飲む
   water: 10, // 畑に水をやる
+  feedMana: 5, // 畑にマナをあげる
 } as const;
 
 export type CropId = 'bean' | 'wheat';

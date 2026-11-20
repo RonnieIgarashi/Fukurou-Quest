@@ -220,7 +220,10 @@ function areaArt(area: AreaId) {
     img.onload = () => {
       entry.ready = true;
       entry.cutouts = AREAS[area].occluders.map((o) => cutout(img, o, o.sway ? SWAYS[o.sway] : undefined));
-      if (area === 'village') entry.sways = Object.values(SWAYS).map((s) => cutout(img, { poly: ellipsePoly(s), baseY: 0 }, s));
+      if (area === 'village') {
+        entry.sways = Object.values(SWAYS).map((s) => cutout(img, { poly: ellipsePoly(s), baseY: 0 }, s));
+        buildRiverMask(img);
+      }
     };
     img.src = src;
     art.set(area, entry);
@@ -252,10 +255,12 @@ export function currentZoom(): number {
 }
 
 function updateZoom(area: AreaId, t: number): void {
-  const target = area === 'village' ? ZOOMS[zoomIdx] : 1;
+  // 室内は、人物を大きく描くぶん（charScale）引いて映し、画面の上では外と同じ大きさに見せる
+  // （2026-11-20 Ronnie「木の家の中に入った時の大きさを、外にいるときと同じ大きさに」。横に黒い所が出てもよい）
+  const target = area === 'village' ? ZOOMS[zoomIdx] : charScale(area);
   const dt = zoomT < 0 ? 1 : Math.min(0.1, Math.max(0, t - zoomT));
   zoomT = t;
-  if (area !== 'village') zoom = 1;
+  if (area !== 'village') zoom = target;
   else zoom += (target - zoom) * Math.min(1, dt * 7);
   if (Math.abs(target - zoom) < 0.002) zoom = target;
 }
@@ -574,15 +579,26 @@ function drawPlot(ctx: Ctx, i: number, p: Plot, items: Drawable[]): void {
 type Path = [number, number][];
 /** 川の流れの中心線（上流から） */
 const RIVER: Path = [
-  [560, 440],
-  [512, 536],
-  [470, 610],
-  [420, 690],
-  [372, 770],
-  [330, 842],
-  [292, 910],
-  [262, 972],
+  // 川の真ん中の線（絵の水の色から測り直した。2026-11-20 Ronnie「上流の流れの座標がおかしくて、雨のように見える」）
+  [562, 490],
+  [552, 530],
+  [540, 565],
+  [530, 600],
+  [510, 640],
+  [490, 672],
+  [468, 705],
+  [445, 735],
+  [420, 768],
+  [392, 800],
+  [365, 830],
+  [340, 860],
+  [318, 895],
+  [302, 930],
+  [296, 960],
+  [300, 990],
 ];
+/** 川の流れの半分の幅（上流ほど細い）。f は上流 0 〜 下流 1 */
+const riverHalf = (f: number) => 8 + 34 * f;
 /** 橋の下からの滝 */
 const FALLS: Path = [
   [236, 1096],
@@ -626,18 +642,70 @@ const RIVER_ACC = pathLength(RIVER);
 const FALLS_ACC = pathLength(FALLS);
 const SHORE_ACC = pathLength(SHORE);
 
+/**
+ * 川の流れを描いてよい所（絵の水の色の所だけ）。上流は木が川にかぶさっているので、
+ * 流れの筋や泡が木の上に出て雨のように見えないよう、水の所だけに切り抜いて描く
+ */
+const RIVER_BOX = { x: 150, y: 470, w: 470, h: 540 };
+let riverMask: HTMLCanvasElement | null = null;
+let riverLayer: HTMLCanvasElement | null = null;
+
+function buildRiverMask(img: HTMLImageElement): void {
+  const { x, y, w, h } = RIVER_BOX;
+  const src = document.createElement('canvas');
+  src.width = w;
+  src.height = h;
+  const sc = src.getContext('2d')!;
+  sc.drawImage(img, x, y, w, h, 0, 0, w, h);
+  const data = sc.getImageData(0, 0, w, h);
+  const px = data.data;
+  const total = RIVER_ACC[RIVER_ACC.length - 1];
+  // 川の線からの距離（流れの幅より少し広い所まで）
+  const near = new Uint8Array(w * h);
+  for (let d = 0; d <= total; d += 2) {
+    const p = pointOn(RIVER, RIVER_ACC, d);
+    const r = riverHalf(d / total) + 12;
+    for (let yy = Math.floor(p.y - r - y); yy <= p.y + r - y; yy++)
+      for (let xx = Math.floor(p.x - r - x); xx <= p.x + r - x; xx++) {
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        if ((xx + x - p.x) ** 2 + (yy + y - p.y) ** 2 <= r * r) near[yy * w + xx] = 1;
+      }
+  }
+  for (let i = 0; i < w * h; i++) {
+    const r = px[i * 4];
+    const g = px[i * 4 + 1];
+    const b = px[i * 4 + 2];
+    const water = (b > r + 18 && b >= g - 6 && b > 100) || (r > 215 && g > 220 && b > 225);
+    px[i * 4] = px[i * 4 + 1] = px[i * 4 + 2] = 255;
+    px[i * 4 + 3] = water && near[i] ? 255 : 0;
+  }
+  sc.putImageData(data, 0, 0);
+  // ふちを少しぼかす
+  const m = document.createElement('canvas');
+  m.width = w;
+  m.height = h;
+  const mc = m.getContext('2d')!;
+  mc.filter = 'blur(1.2px)';
+  mc.drawImage(src, 0, 0);
+  riverMask = m;
+  riverLayer = document.createElement('canvas');
+  riverLayer.width = w;
+  riverLayer.height = h;
+}
+
 function hash(i: number): number {
   const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
 
 /** 流れに沿って白い筋を流す */
-function flowStreaks(ctx: Ctx, p: Path, acc: number[], t: number, n: number, speed: number, width: number, len: number, alpha: number, salt: number): void {
+function flowStreaks(ctx: Ctx, p: Path, acc: number[], t: number, n: number, speed: number, width: number | ((f: number) => number), len: number, alpha: number, salt: number): void {
   const total = acc[acc.length - 1];
   ctx.lineCap = 'round';
   for (let i = 0; i < n; i++) {
     const d = (hash(i + salt) * total + t * speed * (0.8 + hash(i + salt + 50) * 0.4)) % total;
-    const off = (hash(i + salt + 100) - 0.5) * width;
+    const w = typeof width === 'number' ? width : width(d / total) * 2;
+    const off = (hash(i + salt + 100) - 0.5) * w;
     const a = pointOn(p, acc, d);
     const b = pointOn(p, acc, d + len);
     const life = Math.sin((d / total) * Math.PI);
@@ -699,6 +767,8 @@ function drawShore(ctx: Ctx, t: number, cam: Camera): void {
 
 /** 川・滝・波打ち際の粒（地面の高さ。人物より奥に描く） */
 const groundFx = new Particles(500);
+/** 川の泡（水の所だけに切り抜いて描く） */
+const riverFx = new Particles(200);
 /** 噴水の粒（噴水と同じ前後関係で描く） */
 const fountainFx = new Particles(320);
 /** 煙（人物より手前、空の高さ） */
@@ -813,13 +883,14 @@ function emitVillage(dt: number, t: number, forgeBusy: boolean): void {
   // 川：流れに乗って下る小さな泡
   const total = RIVER_ACC[RIVER_ACC.length - 1];
   for (let i = EMIT.riverFoam.count(dt); i > 0; i--) {
-    const d = rand(0, total * 0.85);
+    const d = rand(0, total * 0.9);
     const p = pointOn(RIVER, RIVER_ACC, d);
     const q = pointOn(RIVER, RIVER_ACC, d + 4);
     const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
-    const off = rand(-11, 11);
+    const half = riverHalf(d / total) * 0.75;
+    const off = rand(-half, half);
     const sp = rand(30, 46);
-    groundFx.add({ kind: 'foam', x: p.x + p.nx * off, y: p.y + p.ny * off, vx: ((q.x - p.x) / len) * sp, vy: ((q.y - p.y) / len) * sp, life: rand(1.2, 2.4), size: rand(0.7, 1.5), alpha: 0.75 });
+    riverFx.add({ kind: 'foam', x: p.x + p.nx * off, y: p.y + p.ny * off, vx: ((q.x - p.x) / len) * sp, vy: ((q.y - p.y) / len) * sp, life: rand(1.2, 2.4), size: rand(0.7, 1.5), alpha: 0.75 });
   }
 
   // 波打ち際：寄せる波の先の泡
@@ -861,14 +932,14 @@ function updateFx(area: AreaId, t: number, forgeBusy: boolean, cam: Camera): voi
   dt = Math.min(dt, 0.1);
   lastT = t;
   if (area !== lastArea) {
-    for (const ps of [groundFx, fountainFx, skyFx, roomFx]) ps.clear();
+    for (const ps of [groundFx, riverFx, fountainFx, skyFx, roomFx]) ps.clear();
     lastArea = area;
   }
   if (area === 'village') {
     emitVillage(dt, t, forgeBusy);
     emitLeaves(dt, cam);
   } else emitRoom(area, dt, forgeBusy);
-  for (const ps of [groundFx, fountainFx, skyFx, roomFx]) ps.update(dt);
+  for (const ps of [groundFx, riverFx, fountainFx, skyFx, roomFx]) ps.update(dt);
 }
 
 function drawFountain(ctx: Ctx, t: number): void {
@@ -891,9 +962,25 @@ function drawFountain(ctx: Ctx, t: number): void {
   fountainFx.draw(ctx);
 }
 
+function drawRiver(ctx: Ctx, t: number): void {
+  if (!riverMask || !riverLayer) return;
+  const lc = riverLayer.getContext('2d')!;
+  lc.globalCompositeOperation = 'source-over';
+  lc.clearRect(0, 0, RIVER_BOX.w, RIVER_BOX.h);
+  lc.save();
+  lc.translate(-RIVER_BOX.x, -RIVER_BOX.y);
+  flowStreaks(lc, RIVER, RIVER_ACC, t, 46, 38, (f) => riverHalf(f) * 0.8, 12, 0.55, 0);
+  riverFx.draw(lc);
+  lc.restore();
+  lc.globalCompositeOperation = 'destination-in';
+  lc.drawImage(riverMask, 0, 0);
+  lc.globalCompositeOperation = 'source-over';
+  ctx.drawImage(riverLayer, RIVER_BOX.x, RIVER_BOX.y);
+}
+
 function drawWater(ctx: Ctx, t: number, cam: Camera): void {
   const near = (x0: number, y0: number, x1: number, y1: number) => x1 > cam.x && x0 < cam.x + vw() && y1 > cam.y && y0 < cam.y + vh();
-  if (near(150, 420, 600, 1000)) flowStreaks(ctx, RIVER, RIVER_ACC, t, 46, 38, 26, 14, 0.55, 0);
+  if (near(RIVER_BOX.x, RIVER_BOX.y, RIVER_BOX.x + RIVER_BOX.w, RIVER_BOX.y + RIVER_BOX.h)) drawRiver(ctx, t);
   if (near(80, 1080, 320, 1460)) flowStreaks(ctx, FALLS, FALLS_ACC, t, 60, 110, 90, 22, 0.6, 500);
   drawShore(ctx, t, cam);
   groundFx.draw(ctx);

@@ -8,14 +8,13 @@ import { newSaveFile } from './core/save/schema.js';
 import { SaveStore, SaveSummary } from './core/save/store.js';
 import { advance, checkBedtime, GameEvent, mokuAsleep, momoAsleep } from './core/sim.js';
 import { createGame, Dir, GameState, MANA_IDS, ManaId } from './core/state.js';
-import { fillName, Line, LOOK, Speaker, STORY, STORY_MOVIE, StoryId } from './core/story.js';
+import { fillName, Line, lookLines as lookLinesFor, Speaker, STORY, STORY_MOVIE, StoryId } from './core/story.js';
 import { inventoryItems, optionsFor, runItemAction, runTask, TaskOption } from './core/tasks.js';
 import { clearInput, endFrame, initInput, isHeld, wasPressed } from './input.js';
 import { BASE_H, BASE_W, Ctx, spriteImage, VIEW_W } from './view/gfx.js';
 import { movieExists, playMovie, portrait, preloadPortraits } from './view/media.js';
 import { drawCursor, drawFrame, Screen } from './view/screen.js';
 import { MOKU, MOMO, PLAYER, SpriteDef } from './view/sprites.js';
-import { art } from './view/art.js';
 import { cameraFor, currentZoom, cycleZoom, darkness, drawWorld, PlayerAnim, updateCows } from './view/world.js';
 
 // ---------------------------------------------------------------- 準備
@@ -291,8 +290,9 @@ let toasts: { text: string; t0: number; key?: string }[] = [];
 let saveRequested = false;
 
 function toast(text: string, key?: string): void {
-  // 同じ種類の知らせ（もじ・ズームなど）は、前のを消してから出す
-  if (key) toasts = toasts.filter((m) => m.key !== key);
+  // 同じ種類の知らせ（もじ・ズーム・選べない理由など）と、同じ文の知らせは、前のを消してから出す
+  // （2026-11-20 Ronnie：水やりで Z を連打すると、同じ知らせがいくつも並んでバグっぽく見えた）
+  toasts = toasts.filter((m) => m.text !== text && (!key || m.key !== key));
   toasts.push({ text, t0: t, key });
   if (toasts.length > 3) toasts.shift();
 }
@@ -563,14 +563,14 @@ function interact(): void {
     const from = game.player.area as Exclude<AreaId, 'village'>;
     return moveTo('village', EXIT_TO_VILLAGE[from], 'down');
   }
-  if (spot.kind === 'look') return queueLines(LOOK[spot.id ?? ''] ?? []);
+  if (spot.kind === 'look') return queueLines(lookLinesFor(spot.id ?? '', (w) => (w === 'moku' ? mokuAsleep(game.clock) : momoAsleep(game.clock))));
   menu = { kind: 'task', spot, options: optionsFor(game, spot), idx: 0 };
 }
 
 function runChosenTask(spot: Spot, opt: TaskOption): void {
   menu = null;
   if (opt.disabled) {
-    toast(opt.disabled);
+    toast(opt.disabled, 'reason');
     return;
   }
   const before = game.clock;
@@ -752,7 +752,7 @@ function updateItems(m: Extract<Menu, { kind: 'items' }>): void {
   if (!wasPressed('ok')) return;
   const a = it.actions[m.act];
   if (a.disabled) {
-    toast(a.disabled);
+    toast(a.disabled, 'reason');
     return;
   }
   const res = runItemAction(game, it.id, a.id);
@@ -1007,12 +1007,11 @@ function drawMenu(ctx: Ctx): void {
     if (game.companions.momo.met) list.push(['ももっちゅ', MOMO.idle, momoAsleep(game.clock), '夜でも働けるが、朝に弱い。']);
     list.forEach(([name, def, asleep, note], i) => {
       const y = 70 + i * 28;
-      // Ronnie の素材の正面の絵（読み込み前はドット絵）。高解像度のまま縦横比を保って描く
-      const img = art(i === 0 ? 'moku-front' : 'momo-front');
+      // 会話の欄と同じ顔の絵（2026-11-20 Ronnie「セリフ欄に表示する絵に揃えて」）。読み込み前はドット絵
+      const img = portrait(i === 0 ? 'moku' : 'momo');
       if (img) {
-        const h = 22;
-        const w = (img.naturalWidth / img.naturalHeight) * h;
-        screen.image(img, 60 - w / 2, y - 4, w, h);
+        drawFrame(ctx, 47, y - 5, 24, 24, 0.92);
+        screen.image(img, 48, y - 4, 22, 22);
       } else ctx.drawImage(spriteImage(def), 50, y - 2, 20, 20);
       screen.text(74, y, `${name}　${asleep ? '（ねている）' : '（おきている）'}`, { size: 10 });
       screen.text(74, y + 13, note, { size: 9, color: '#b8b0e0' });

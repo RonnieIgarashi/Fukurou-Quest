@@ -7,8 +7,9 @@ import { SaveFile, SaveSummary } from './store.js';
  * 1→2：村が一枚絵になり、座標が変わった（畑の番号と中身はそのまま）
  * 2→3：エリア（村・小屋の中・鍛冶小屋の中）を持つようになった。無ければ村
  * 3→4：水（持っている水・樽の浄化した水）・からだの具合・畑の水やりを持つようになった。無ければ初期値
+ * 4→5：畑のマナは朝に勝手に使わず、畑で自分であげる（fed）ようになった。無ければ「まだあげていない」
  */
-export const SAVE_SCHEMA = 4;
+export const SAVE_SCHEMA = 5;
 
 export function newSaveFile(slotId: string, game: GameState, now: Date, ownerId: string | null = null): SaveFile {
   const iso = now.toISOString();
@@ -58,6 +59,7 @@ export function migrate(raw: unknown): SaveFile | null {
             crop: p.crop,
             growth: p.growth,
             stalled: p.stalled,
+            fed: p.fed === true,
             watered: p.watered === 'pure' || p.watered === 'river' ? p.watered : 'none',
             dry: p.dry === true,
             pureDays: typeof p.pureDays === 'number' ? p.pureDays : 0,

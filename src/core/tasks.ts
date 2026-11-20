@@ -1,7 +1,7 @@
 // タスク（行動）。実行すると効果を反映し、所要時間ぶん advance() で時間をまとめて進める。
 import { formatClock, minuteOfDay } from './clock.js';
 import { Spot } from './map.js';
-import { CropId, CROPS, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
+import { CropId, CROPS, FARM_MANA_PER_PLOT_PER_DAY, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
 import { advance, GameEvent, sleepUntilMorning } from './sim.js';
 import { FARM_MANA, GameState, MANA_IDS, MANA_NAMES } from './state.js';
 
@@ -115,6 +115,16 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
           minutes: TASK_MINUTES.water,
           disabled: already ?? (s.water.carried.river <= 0 ? '川の水を持っていない（水くみ場でくめる）' : null),
         },
+        {
+          id: 'feedMana',
+          label: `マナをあげる（地・火・風を${FARM_MANA_PER_PLOT_PER_DAY}つずつ）`,
+          minutes: TASK_MINUTES.feedMana,
+          disabled: p.fed
+            ? 'もうマナをあげてある（育った朝に使われる）'
+            : FARM_MANA.some((m) => s.inv.mana[m] < FARM_MANA_PER_PLOT_PER_DAY)
+              ? `マナが足りない（地・火・風が${FARM_MANA_PER_PLOT_PER_DAY}つずつ要る）`
+              : null,
+        },
         { id: 'lookPlot', label: '様子を見る', minutes: 0, disabled: null },
       ];
     }
@@ -157,9 +167,10 @@ function plotStatus(s: GameState, spot: Spot): string {
   if (!p || !p.crop) return '何も植わっていない。';
   const c = CROPS[p.crop];
   const left = c.days - p.growth;
-  const stall = p.dry ? ' 水が無く、育たなかった。' : p.stalled ? ' マナが足りず、生育が止まっている。' : '';
+  const stall = p.dry ? ' 水が無く、育たなかった。' : p.stalled ? ' マナが無く、育たなかった。' : '';
   const today = p.watered === 'pure' ? '今日はきれいな水をやった。' : p.watered === 'river' ? '今日は川の水をやった。' : '今日はまだ水をやっていない。';
-  return `${c.name}が育っている。収穫まであと${left}日。${today}${stall}`;
+  const mana = p.fed ? 'マナはあげてある。' : 'マナはまだあげていない。';
+  return `${c.name}が育っている。収穫まであと${left}日。${today}${mana}${stall}`;
 }
 
 function manaLine(s: GameState): string {
@@ -221,11 +232,12 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     p.crop = crop;
     p.growth = 0;
     p.stalled = false;
+    p.fed = false;
     pass(TASK_MINUTES.plant);
     p.watered = 'none';
     p.dry = false;
     p.pureDays = 0;
-    messages.push(`${CROPS[crop].name}の種をまいた。毎日水をやると、次の朝に地・火・風のマナを1つずつ使って育つ。（いま ${manaLine(s)}）`);
+    messages.push(`${CROPS[crop].name}の種をまいた。水とマナ（地・火・風）をあげると、次の朝に育つ。`);
   } else if (id === 'harvest' && p && p.crop) {
     const c = CROPS[p.crop];
     const n = harvestYield(p.crop, p.pureDays);
@@ -244,6 +256,11 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     p.watered = kind;
     pass(TASK_MINUTES.water);
     messages.push(kind === 'pure' ? 'きれいな水をやった。よく育ちそうだ。' : '川の水をやった。');
+  } else if (id === 'feedMana' && p) {
+    for (const m of FARM_MANA) s.inv.mana[m] -= FARM_MANA_PER_PLOT_PER_DAY;
+    p.fed = true;
+    pass(TASK_MINUTES.feedMana);
+    messages.push(`地・火・風のマナを${FARM_MANA_PER_PLOT_PER_DAY}つずつ、畑にあげた。（のこり ${manaLine(s)}）`);
   } else if (id === 'drink') {
     s.water.barrelPure -= WATER.DRINK;
     s.body.thirst = 0;
@@ -335,7 +352,11 @@ export function inventoryItems(s: GameState): InventoryItem[] {
     id: 'mana',
     name: 'マナ',
     count: MANA_IDS.map((m) => `${MANA_NAMES[m]}${s.inv.mana[m]}`).join(' '),
-    actions: none('畑・炉・水くみ場で使う'),
+    actions: [
+      { id: 'none', label: '畑にあげる', disabled: '畑を調べて「マナをあげる」を選ぶ（地・火・風）' },
+      { id: 'none', label: '炉に入れる', disabled: '鍛冶小屋の炉を調べる（白のマナ）' },
+      { id: 'none', label: '水を浄化する', disabled: '水くみ場の樽を調べる（水のマナ）' },
+    ],
   });
   return items;
 }

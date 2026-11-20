@@ -25,8 +25,10 @@ export interface Plot {
   crop: CropId | null;
   /** 育った日数 */
   growth: number;
-  /** 直近の朝にマナが足りず生育が止まったか */
+  /** 直近の朝にマナが無く生育が止まったか */
   stalled: boolean;
+  /** 畑にあげてあるマナ（地・火・風を1つずつ）。育った朝に使い切る。水と違って、育つまで土に残る */
+  fed: boolean;
   /** 今日やった水（朝の生育で使い、朝にまた none に戻る） */
   watered: 'none' | 'river' | 'pure';
   /** 直近の朝に水が足りず生育が止まったか */
@@ -71,7 +73,7 @@ export interface GameState {
 }
 
 export function newPlot(): Plot {
-  return { stage: 'wild', crop: null, growth: 0, stalled: false, watered: 'none', dry: false, pureDays: 0 };
+  return { stage: 'wild', crop: null, growth: 0, stalled: false, fed: false, watered: 'none', dry: false, pureDays: 0 };
 }
 
 export function createGame(playerName: string): GameState {

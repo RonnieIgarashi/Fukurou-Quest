@@ -2,8 +2,8 @@
 // （仕様書の原則「時間更新処理を二重実装しない」）。
 import { dayOf, isPastBedtime, minuteOfDay, nextMorning } from './clock.js';
 import { WAKE } from './map.js';
-import { BODY, CROPS, FARM_MANA_PER_PLOT_PER_DAY, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
-import { FARM_MANA, GameState, MANA_NAMES } from './state.js';
+import { BODY, CROPS, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
+import { GameState } from './state.js';
 import { StoryId } from './story.js';
 
 export type GameEvent =
@@ -26,45 +26,33 @@ export function momoAsleep(t: number): boolean {
 
 /**
  * 毎朝 6:00 の処理：畑の生育。
- * 前の日に水をやった区画だけが、地・火・風のマナを1つずつ使って1日育つ（水が無い・マナが足りないと止まる）。
+ * 前の日に水をやり、マナ（地・火・風を1つずつ）をあげてある区画だけが1日育つ。
+ * マナは朝に勝手に使わない。主人公が畑で「マナをあげる」を選んだときに使い、育った朝に土から無くなる
+ * （2026-11-20 Ronnie「マナは勝手に使われるものではなく、畑に行って Z で使うかどうかを決める」）。
  * きれいな水で育った日は数えておき、収穫のときに収量が増える。水は毎朝やり直し
  */
 function morning(s: GameState, out: GameEvent[]): void {
   let stalled = 0;
   let dry = 0;
-  let grew = 0;
   for (const p of s.plots) {
     if (p.stage !== 'growing' || !p.crop) {
       p.watered = 'none';
       continue;
     }
     p.dry = p.watered === 'none';
-    if (p.dry) {
-      dry++;
-      continue;
-    }
-    const enough = FARM_MANA.every((m) => s.inv.mana[m] >= FARM_MANA_PER_PLOT_PER_DAY);
-    if (!enough) {
-      p.stalled = true;
-      stalled++;
-    } else {
-      for (const m of FARM_MANA) s.inv.mana[m] -= FARM_MANA_PER_PLOT_PER_DAY;
-      p.stalled = false;
+    p.stalled = !p.dry && !p.fed;
+    if (p.dry) dry++;
+    else if (p.stalled) stalled++;
+    else {
+      p.fed = false;
       p.growth++;
-      grew++;
       if (p.watered === 'pure') p.pureDays++;
       if (p.growth >= CROPS[p.crop].days) p.stage = 'ready';
     }
     p.watered = 'none';
   }
-  // 畑がマナを使ったことを知らせる（2026-11-19：火のマナがいつの間にか 0 になったと Ronnie が気づいたため）
-  if (grew > 0) {
-    const used = grew * FARM_MANA_PER_PLOT_PER_DAY;
-    const left = FARM_MANA.map((m) => `${MANA_NAMES[m]}${s.inv.mana[m]}`).join(' ');
-    out.push({ kind: 'message', text: `畑の${grew}区画が育った。地・火・風のマナを${used}つずつ使った。（のこり ${left}）` });
-  }
   if (dry > 0) out.push({ kind: 'message', text: `水が無く、畑の${dry}区画が育たなかった。毎日、水をやろう。` });
-  if (stalled > 0) out.push({ kind: 'message', text: `マナが足りず、畑の${stalled}区画の生育が止まっている。` });
+  if (stalled > 0) out.push({ kind: 'message', text: `マナが無く、畑の${stalled}区画が育たなかった。畑でマナをあげよう。` });
   const ready = s.plots.filter((p) => p.stage === 'ready').length;
   if (ready > 0) out.push({ kind: 'message', text: `畑の${ready}区画が収穫できそうだ。` });
 }

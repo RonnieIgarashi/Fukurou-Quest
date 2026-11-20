@@ -8,7 +8,7 @@ import { LocalSaveStore, MemoryKeyValue } from '../src/core/save/localStore.js';
 import { migrate, newSaveFile, SAVE_SCHEMA } from '../src/core/save/schema.js';
 import { advance, checkBedtime, mokuAsleep, momoAsleep, sleepUntilMorning } from '../src/core/sim.js';
 import { createGame } from '../src/core/state.js';
-import { LOOK } from '../src/core/story.js';
+import { LOOK, lookLines } from '../src/core/story.js';
 import { inventoryItems, optionsFor, runItemAction, runTask } from '../src/core/tasks.js';
 
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
@@ -55,7 +55,7 @@ test('一度に進めても、1分ずつ進めても同じ状態になる', () =
 
 // ---------------------------------------------------------------- 畑
 
-test('豆は地・火・風のマナを毎朝1つずつ使って育ち（水のマナは使わない）、収穫できる', () => {
+test('豆は水と、畑であげたマナ（地・火・風を1つずつ。水のマナは使わない）で育ち、収穫できる', () => {
   const g = createGame('テスト');
   g.inv.mana.fire = 10;
   const spot = plotSpot(0);
@@ -66,6 +66,7 @@ test('豆は地・火・風のマナを毎朝1つずつ使って育ち（水の�
   for (let d = 0; d < CROPS.bean.days; d++) {
     g.water.carried.river = 1;
     runTask(g, spot, 'water:river');
+    runTask(g, spot, 'feedMana');
     sleepUntilMorning(g);
   }
   assert.equal(g.plots[0].stage, 'ready');
@@ -77,48 +78,58 @@ test('豆は地・火・風のマナを毎朝1つずつ使って育ち（水の�
   assert.equal(g.plots[0].stage, 'tilled');
 });
 
-test('火のマナが無いと生育が止まる（地・火・風のどれかが欠けると止まる）', () => {
+test('マナは朝に勝手に使われない。あげていないと育たない', () => {
   const g = createGame('テスト');
-  assert.equal(g.inv.mana.fire, 0);
+  g.inv.mana.fire = 10;
   const spot = plotSpot(1);
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
   g.water.carried.river = 1;
   runTask(g, spot, 'water:river');
+  const before = { ...g.inv.mana };
   const events = sleepUntilMorning(g);
   assert.equal(g.plots[1].growth, 0);
   assert.equal(g.plots[1].stalled, true);
-  assert.ok(events.some((e) => e.kind === 'message' && e.text.includes('生育が止まっている')));
-  assert.equal(g.inv.mana.earth, createGame('テスト').inv.mana.earth); // 止まった区画はマナを使わない
+  assert.deepEqual(g.inv.mana, before);
+  assert.ok(events.some((e) => e.kind === 'message' && e.text.includes('マナが無く')));
 });
 
-test('水をやらないと育たない（マナも使わない）', () => {
+test('マナが足りないと、畑にあげられない。あげたマナは育つまで土に残る', () => {
   const g = createGame('テスト');
-  g.inv.mana.fire = 10;
+  assert.equal(g.inv.mana.fire, 0);
   const spot = plotSpot(2);
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
+  assert.ok(optionsFor(g, spot).find((o) => o.id === 'feedMana')?.disabled?.includes('足りない'));
+  g.inv.mana.fire = 1;
+  runTask(g, spot, 'feedMana');
+  assert.equal(g.plots[2].fed, true);
+  assert.equal(g.inv.mana.fire, 0);
+  assert.ok(optionsFor(g, spot).find((o) => o.id === 'feedMana')?.disabled?.includes('もう'));
+  // 水をやらずに寝ても、マナは残る
   const events = sleepUntilMorning(g);
-  assert.equal(g.plots[2].growth, 0);
   assert.equal(g.plots[2].dry, true);
-  assert.equal(g.inv.mana.fire, 10);
+  assert.equal(g.plots[2].fed, true);
   assert.ok(events.some((e) => e.kind === 'message' && e.text.includes('水が無く')));
+  g.water.carried.river = 1;
+  runTask(g, spot, 'water:river');
+  sleepUntilMorning(g);
+  assert.equal(g.plots[2].growth, 1);
+  assert.equal(g.plots[2].fed, false);
 });
 
-test('きれいな水で育てると収量が増え、畑がマナを使ったことを知らせる', () => {
+test('きれいな水で育てると収量が増える', () => {
   const g = createGame('テスト');
   g.inv.mana.fire = 10;
   const spot = plotSpot(3);
   runTask(g, spot, 'till');
   runTask(g, spot, 'plant:bean');
-  let told = false;
   for (let d = 0; d < CROPS.bean.days; d++) {
     g.water.carried.pure = 1;
     runTask(g, spot, 'water:pure');
-    const ev = sleepUntilMorning(g);
-    told ||= ev.some((e) => e.kind === 'message' && e.text.includes('マナを1つずつ使った'));
+    runTask(g, spot, 'feedMana');
+    sleepUntilMorning(g);
   }
-  assert.ok(told);
   runTask(g, spot, 'harvest');
   assert.ok(g.inv.crops.bean > CROPS.bean.yield);
 });
@@ -407,4 +418,14 @@ test('古い・欠けたデータは初期値で補い、新しい版や壊れ�
   assert.equal(migrate({ schema: SAVE_SCHEMA + 1, game: { playerName: 'ア', clock: 1 } }), null);
   assert.equal(migrate('broken'), null);
   assert.equal(migrate({ game: { clock: 1 } }), null);
+});
+
+test('仲間が眠っている夜に調べると、仲間ではなく主人公が感想を言う', () => {
+  const awake = lookLines('fountain', () => false);
+  assert.equal(awake[0].speaker, 'moku');
+  const night = lookLines('fountain', (w) => w === 'moku');
+  assert.ok(night.length > 0 && night.every((l) => l.speaker === 'player'));
+  assert.ok(night[0].text.startsWith('…'));
+  // 仲間が話さない物は、夜もそのまま
+  assert.deepEqual(lookLines('sea', () => true), LOOK.sea);
 });

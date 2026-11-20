@@ -82,6 +82,24 @@ export const LOOK: Record<string, Line[]> = {
   woodpile: [{ speaker: 'player', text: '薪が積んである。炉にくべる燃料だ。' }],
 };
 
+/**
+ * 仲間が眠っている夜に調べたときの台詞。仲間の代わりに、主人公が「…〜のようだ」と感想を言う
+ * （2026-11-20 Ronnie「モクちゃんらが寝ていても回答が来るのは不自然」）。
+ * LOOK のうち仲間が話す物だけ用意する。無ければ LOOK のまま
+ */
+export const LOOK_NIGHT: Record<string, Line[]> = {
+  fountain: [{ speaker: 'player', text: '…噴水の音だけが聞こえる。夜の水も、きらきら光っているようだ。' }],
+  perch: [{ speaker: 'player', text: '…モクちゃんの止まり木のようだ。夜はここで眠るらしい。' }],
+  hutTable: [{ speaker: 'player', text: '…みんなでごはんを食べるテーブルのようだ。上のわらのベッドは、モクちゃんの寝床だったな。' }],
+};
+
+/** 調べたときの台詞。話し手の仲間が眠っていれば、夜の台詞にする */
+export function lookLines(id: string, asleep: (who: 'moku' | 'momo') => boolean): Line[] {
+  const day = LOOK[id] ?? [];
+  const sleeper = day.some((l) => (l.speaker === 'moku' || l.speaker === 'momo') && asleep(l.speaker));
+  return sleeper ? (LOOK_NIGHT[id] ?? day.filter((l) => l.speaker !== 'moku' && l.speaker !== 'momo')) : day;
+}
+
 export function fillName(text: string, name: string): string {
   return text.split('{name}').join(name);
 }
