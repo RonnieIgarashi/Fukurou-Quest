@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dayOf, formatClock, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
-import { AREAS, bridgeDeck, footFree, HOME, isBlockedAt, nearestFree, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
+import { AREAS, bridgeDeck, charScaleAt, footFree, HOME, isBlockedAt, nearestFree, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from '../src/core/names.js';
 import { BODY, CROPS, FORGE, MINUTES_PER_DAY, TIME, WATER } from '../src/core/params.js';
 import { LocalSaveStore, MemoryKeyValue } from '../src/core/save/localStore.js';
@@ -443,4 +443,12 @@ test('森：村の小道の上の端から入れて、倒木で薪が1日3本ま
   assert.ok(optionsFor(g, log)[0].disabled);
   sleepUntilMorning(g);
   assert.equal(woodLeft(g), 3);
+});
+
+test('森：奥まで歩けて、奥ほど人物が小さい。いちばん奥で道の先を調べられる', () => {
+  assert.equal(footFree('forest', 487, 232), true);
+  assert.ok(charScaleAt('forest', 232) < charScaleAt('forest', 400));
+  assert.ok(charScaleAt('forest', 400) < charScaleAt('forest', 600));
+  assert.equal(charScaleAt('village', 900), 1);
+  assert.equal(spotAt('forest', 487, 215)?.id, 'forestPath');
 });

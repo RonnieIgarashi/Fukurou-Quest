@@ -1,6 +1,6 @@
 // 起動と画面の切り替え（タイトル → セーブ枠 → 名前入力 → ムービー → フィールド）。
 import { dayOf, formatClock, hourFloat, START_TIME } from './core/clock.js';
-import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, charScale, isBlockedAt, nearestFree, Spot, spotAt } from './core/map.js';
+import { AreaId, AREAS, BEDS, ENTRANCES, EXIT_TO_VILLAGE, HOME, charScale, charScaleAt, isBlockedAt, nearestFree, Spot, spotAt } from './core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from './core/names.js';
 import { BODY, NAME_MAX, TIME, WATER } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
@@ -378,7 +378,7 @@ const DIRS: Record<Dir, [number, number]> = { down: [0, 1], up: [0, -1], left: [
 
 function blockedAt(x: number, y: number): boolean {
   // 足元の小さな四角（幅16・高さ6。家の中では人物が大きいので広げる）で当たりを取る
-  const cs = charScale(game.player.area);
+  const cs = charScaleAt(game.player.area, y);
   const pts = [
     [x - 8 * cs, y - 6 * cs],
     [x + 8 * cs, y - 6 * cs],
@@ -402,8 +402,10 @@ function movePlayer(dt: number): void {
   const len = Math.hypot(dx, dy);
   // のどが渇いていると走れない（2026-11-19 Ronnie 指示）
   const sp = isHeld('run') && game.body.thirst < BODY.THIRST_NO_RUN ? RUN_SPEED : SPEED;
-  const vx = (dx / len) * sp * dt;
-  const vy = (dy / len) * sp * dt;
+  // 奥行きのある所では、奥ほど小さく見えるぶん、ゆっくり進む
+  const persp = charScaleAt(p.area, p.y) / charScale(p.area);
+  const vx = (dx / len) * sp * persp * dt;
+  const vy = (dy / len) * sp * persp * dt;
   const before = { x: p.x, y: p.y };
   if (!blockedAt(p.x + vx, p.y)) p.x += vx;
   else if (vx !== 0 && vy === 0) {
@@ -508,7 +510,7 @@ function frontSpot(): Spot | null {
   const p = game.player;
   const [dx, dy] = DIRS[p.dir];
   const fy = p.y - 3;
-  const k = 18 * charScale(p.area);
+  const k = 18 * charScaleAt(p.area, p.y);
   return spotAt(p.area, p.x + dx * k, fy + dy * k) ?? spotAt(p.area, p.x, fy);
 }
 
@@ -526,7 +528,7 @@ const TALK: Record<'moku' | 'momo', { awake: string[]; asleep: string[] }> = {
 function talkTarget(): 'moku' | 'momo' | null {
   const p = game.player;
   const [dx, dy] = DIRS[p.dir];
-  const ks = charScale(p.area);
+  const ks = charScaleAt(p.area, p.y);
   const fx = p.x + dx * 16 * ks;
   const fy = p.y + dy * 16 * ks;
   for (const k of ['moku', 'momo'] as const) {
@@ -1051,7 +1053,7 @@ function drawField(ctx: Ctx): void {
     const cam = cameraFor(game);
     const k = BASE_W / (VIEW_W * currentZoom());
     const cx = Math.round((game.player.x - cam.x) * k);
-    const cy = Math.round((game.player.y - cam.y - 66 * charScale(game.player.area)) * k);
+    const cy = Math.round((game.player.y - cam.y - 66 * charScaleAt(game.player.area, game.player.y)) * k);
     drawFrame(ctx, cx - 10, cy - 12, 20, 12, 0.85);
     screen.text(cx, cy - 11, '！', { size: 9, align: 'center', color: '#ffe066' });
   }

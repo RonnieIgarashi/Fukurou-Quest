@@ -1,7 +1,7 @@
 // フィールドの描画：背景の絵 → 水の動き・畑 → 物と人物（足元の y で前後を決める。絵の建物や木は切り抜きを手前に重ねる）
 // → 時刻の光 → 周辺減光。座標はエリアの絵の px（ワールド単位）。画面には 800x450 の範囲を映す。
 import { hourFloat } from '../core/clock.js';
-import { AreaId, AREAS, charScale, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
+import { AreaId, AREAS, charScale, charScaleAt, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
 import { CROPS, CropId } from '../core/params.js';
 import { mokuAsleep, momoAsleep } from '../core/sim.js';
 import { Companion, Dir, GameState, Plot } from '../core/state.js';
@@ -995,7 +995,7 @@ const lastPos: Partial<Record<'moku' | 'momo', { x: number; y: number }>> = {};
 
 function companionDrawable(c: Companion, kind: 'moku' | 'momo', asleep: boolean, t: number): Drawable {
   // 飛べる2匹なので、起きているときはふわふわ浮く（ゆっくり、小さく）
-  const cs = charScale(c.area);
+  const cs = charScaleAt(c.area, c.y);
   const float = (asleep ? 0 : Math.sin(t * 2.2 + (kind === 'moku' ? 0 : 2)) * 1.5 - (kind === 'momo' ? 12 : 3)) * cs;
   return {
     y: c.y,
@@ -1139,7 +1139,7 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
     y: p.y,
     x: p.x,
     draw: (c) => {
-      const ps = charScale(p.area);
+      const ps = charScaleAt(p.area, p.y);
       drawShadow(c, p.x, p.y, 30 * ps);
       drawAtFeet(c, PLAYER[facing][step], p.x, p.y + 2 * ps, p.dir === 'left', SPRITE_SCALE * ps);
     },

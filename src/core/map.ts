@@ -38,6 +38,11 @@ export interface Area {
   occluders: Occluder[];
   /** 人物を描く大きさの倍率（家の中の絵は村より大きく描いてあるので、人物も大きくする） */
   charScale?: number;
+  /**
+   * 奥行き（遠近）。y が far の所では farScale、near の所では nearScale の大きさで人物を描き、その間はなめらかに変える。
+   * 正面から奥を見た絵（森の道など）で、奥へ行くほど小さく見せる（2026-11-20 Ronnie）。映す倍率は charScale のまま
+   */
+  depth?: { far: number; farScale: number; near: number; nearScale: number };
 }
 
 /** 背景の色の種類（切り抜きから抜いて、後ろが透けて見えるようにする） */
@@ -627,7 +632,8 @@ const FOREST: Area = {
   walkable: [
     [
       [365, 615], [372, 595], [402, 540], [425, 500], [400, 450], [390, 425], [396, 408], [432, 400], [445, 355],
-      [452, 330], [535, 330], [540, 380], [555, 445], [600, 500], [625, 560], [635, 615],
+      [455, 300], [468, 250], [474, 222], [500, 222], [512, 250], [535, 300], [540, 380], [555, 445], [600, 500],
+      [625, 560], [635, 615],
     ],
   ],
   blocked: [],
@@ -635,10 +641,12 @@ const FOREST: Area = {
   spots: [
     { spot: { kind: 'exit', id: 'village' }, poly: rect(355, 598, 645, 640) },
     { spot: { kind: 'log' }, poly: rect(335, 260, 445, 420) },
-    { spot: { kind: 'look', id: 'forestPath' }, poly: rect(445, 300, 545, 345) },
+    { spot: { kind: 'look', id: 'forestPath' }, poly: rect(462, 190, 515, 226) },
   ],
   occluders: [],
   charScale: 1.25,
+  // 道の幅の細くなり方に合わせて、手前は大きく、奥ほど小さく
+  depth: { far: 222, farScale: 0.45, near: 615, nearScale: 1.3 },
 };
 
 export const AREAS: Record<AreaId, Area> = { village: VILLAGE, hut: HUT, smithy: SMITHY, forest: FOREST };
@@ -678,14 +686,22 @@ export function isBlockedAt(area: AreaId, x: number, y: number): boolean {
   return a.blocked.some((p) => inPoly(x, y, p)) && !a.open.some((p) => inPoly(x, y, p));
 }
 
-/** 人物を描く大きさの倍率（村は 1） */
+/** そのエリアを映す倍率（人物の手前での大きさ。村は 1） */
 export function charScale(area: AreaId): number {
   return AREAS[area].charScale ?? 1;
 }
 
+/** その高さ（足元の y）で人物を描く大きさ。奥行きのあるエリアでは、奥ほど小さい */
+export function charScaleAt(area: AreaId, y: number): number {
+  const d = AREAS[area].depth;
+  if (!d) return charScale(area);
+  const k = Math.max(0, Math.min(1, (y - d.far) / (d.near - d.far)));
+  return d.farScale + (d.nearScale - d.farScale) * k;
+}
+
 /** 足元の小さな四角（幅16・高さ6。人物の大きさに合わせて広がる）がどこもふさがっていないか（主人公の当たりと同じ） */
 export function footFree(area: AreaId, x: number, y: number): boolean {
-  const k = charScale(area);
+  const k = charScaleAt(area, y);
   return [
     [x - 8 * k, y - 6 * k],
     [x + 8 * k, y - 6 * k],
