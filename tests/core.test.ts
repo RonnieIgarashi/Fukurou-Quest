@@ -9,7 +9,7 @@ import { migrate, newSaveFile, SAVE_SCHEMA } from '../src/core/save/schema.js';
 import { advance, checkBedtime, mokuAsleep, momoAsleep, sleepUntilMorning } from '../src/core/sim.js';
 import { createGame } from '../src/core/state.js';
 import { LOOK, lookLines } from '../src/core/story.js';
-import { inventoryItems, optionsFor, runItemAction, runTask } from '../src/core/tasks.js';
+import { inventoryItems, optionsFor, runItemAction, runTask, woodLeft } from '../src/core/tasks.js';
 
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
 const plotSpot = (i: number): Spot => spotAt('village', (PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
@@ -282,7 +282,7 @@ test('村：小屋と鍛冶小屋に入れ、畑の6区画と、慰霊碑・森�
   for (let i = 0; i < PLOTS.length; i++) assert.equal(plotSpot(i).plot, i);
   const looks: [number, number, string][] = [
     [1785, 790, 'memorial'],
-    [1530, 620, 'forestGate'],
+    [1420, 663, 'forestGate'],
     [1540, 782, 'cart'],
     [905, 838, 'fountain'],
     [1030, 886, 'bench'],
@@ -428,4 +428,19 @@ test('仲間が眠っている夜に調べると、仲間ではなく主人公�
   assert.ok(night[0].text.startsWith('…'));
   // 仲間が話さない物は、夜もそのまま
   assert.deepEqual(lookLines('sea', () => true), LOOK.sea);
+});
+
+test('森：村の小道の上の端から入れて、倒木で薪が1日3本まで取れる', () => {
+  assert.equal(spotAt('village', 1525, 596)?.kind, 'enter');
+  assert.equal(spotAt('village', 1525, 596)?.id, 'forest');
+  const g = createGame('テスト');
+  const log = spotAt('forest', 410, 389)!;
+  assert.equal(log.kind, 'log');
+  const wood = g.inv.goods.wood;
+  for (let i = 0; i < 3; i++) runTask(g, log, 'gatherWood');
+  assert.equal(g.inv.goods.wood, wood + 3);
+  assert.equal(woodLeft(g), 0);
+  assert.ok(optionsFor(g, log)[0].disabled);
+  sleepUntilMorning(g);
+  assert.equal(woodLeft(g), 3);
 });

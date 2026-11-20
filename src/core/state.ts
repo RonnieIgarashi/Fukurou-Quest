@@ -63,6 +63,8 @@ export interface GameState {
   water: { carried: { river: number; pure: number }; barrelPure: number };
   /** からだの具合（0〜100。大きいほど渇いて・空いている） */
   body: { thirst: number; hunger: number };
+  /** 森の倒木。woodDay の日に woodTaken 本取った（日が変わると、また取れる） */
+  forest: { woodDay: number; woodTaken: number };
   /** 炉。queue は変化中の白のマナ1つずつの残り分、ready は取り出せる火のマナ */
   forge: { queue: number[]; ready: number };
   companions: { moku: Companion; momo: Companion };
@@ -90,6 +92,7 @@ export function createGame(playerName: string): GameState {
     plots: PLOTS.map(newPlot),
     water: { carried: { river: 0, pure: 0 }, barrelPure: 0 },
     body: { thirst: 0, hunger: 0 },
+    forest: { woodDay: 0, woodTaken: 0 },
     forge: { queue: [], ready: 0 },
     companions: {
       moku: { met: true, area: 'village', x: HOME.x + 34, y: HOME.y + 4, dir: 'down' },

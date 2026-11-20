@@ -6,7 +6,7 @@
 export type Pt = readonly [number, number];
 export type Poly = readonly Pt[];
 
-export type AreaId = 'village' | 'hut' | 'smithy';
+export type AreaId = 'village' | 'hut' | 'smithy' | 'forest';
 
 /**
  * 調べられる場所の種類
@@ -14,7 +14,7 @@ export type AreaId = 'village' | 'hut' | 'smithy';
  * - look：見るだけ（説明の台詞は story.ts の LOOK）
  * - bed / desk / forge / plot / barrel：タスクを選ぶ（barrel は水くみ場の樽）
  */
-export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot' | 'barrel';
+export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot' | 'barrel' | 'log';
 
 export interface Spot {
   kind: SpotKind;
@@ -162,7 +162,7 @@ const VILLAGE: Area = {
       [1385, 600],
       [1385, 640],
       [1462, 640],
-      // 森の入り口の小道（今は奥へは行けない）
+      // 森の入り口の小道（上の端で森に入る）
       [1478, 594],
       [1572, 594],
       // 荒野の立て札の上の針葉樹・広葉樹の根元より手前だけ歩ける
@@ -254,7 +254,9 @@ const VILLAGE: Area = {
     { spot: { kind: 'enter', id: 'hut' }, poly: rect(992, 622, 1040, 662) },
     { spot: { kind: 'enter', id: 'smithy' }, poly: rect(1530, 1112, 1626, 1150) },
     { spot: { kind: 'look', id: 'memorial' }, poly: rect(1716, 700, 1852, 800) },
-    { spot: { kind: 'look', id: 'forestGate' }, poly: rect(1380, 580, 1605, 668) },
+    // 森の入り口（2026-11-20）：立て札の右の道を上へ歩くと森へ入る。立て札は調べられる
+    { spot: { kind: 'enter', id: 'forest' }, poly: rect(1478, 586, 1575, 606) },
+    { spot: { kind: 'look', id: 'forestGate' }, poly: rect(1380, 600, 1462, 668) },
     { spot: { kind: 'look', id: 'wastelandSign' }, poly: rect(1612, 735, 1700, 815) },
     { spot: { kind: 'look', id: 'cart' }, poly: rect(1488, 722, 1594, 788) },
     { spot: { kind: 'look', id: 'fountain' }, poly: ellipse(905, 838, 64, 32) },
@@ -613,7 +615,33 @@ const SMITHY: Area = {
   occluders: [],
 };
 
-export const AREAS: Record<AreaId, Area> = { village: VILLAGE, hut: HUT, smithy: SMITHY };
+/**
+ * 森の入り口（Ronnie の絵 docs/concept/forest_entrance.jpg。tools/prepare_forest.py で 1000x615 に）。
+ * 奥へ続く道を正面から見た絵なので、手前の道だけを歩ける。左の倒木で薪が取れる（2026-11-20 Ronnie）。
+ * 拾える薪・マナの絵は、あとで Ronnie が用意する
+ */
+const FOREST: Area = {
+  w: 1000,
+  h: 615,
+  image: 'assets/maps/forest.jpg',
+  walkable: [
+    [
+      [365, 615], [372, 595], [402, 540], [425, 500], [400, 450], [390, 425], [396, 408], [432, 400], [445, 355],
+      [452, 330], [535, 330], [540, 380], [555, 445], [600, 500], [625, 560], [635, 615],
+    ],
+  ],
+  blocked: [],
+  open: [],
+  spots: [
+    { spot: { kind: 'exit', id: 'village' }, poly: rect(355, 598, 645, 640) },
+    { spot: { kind: 'log' }, poly: rect(335, 260, 445, 420) },
+    { spot: { kind: 'look', id: 'forestPath' }, poly: rect(445, 300, 545, 345) },
+  ],
+  occluders: [],
+  charScale: 1.25,
+};
+
+export const AREAS: Record<AreaId, Area> = { village: VILLAGE, hut: HUT, smithy: SMITHY, forest: FOREST };
 
 // ================================================================ 出入りと寝床
 
@@ -625,10 +653,12 @@ export const ENTRANCES: Record<AreaId, { x: number; y: number }> = {
   village: HOME,
   hut: { x: 462, y: 652 },
   smithy: { x: 400, y: 378 },
+  forest: { x: 500, y: 575 },
 };
 export const EXIT_TO_VILLAGE: Record<Exclude<AreaId, 'village'>, { x: number; y: number }> = {
   hut: HOME,
   smithy: { x: 1578, y: 1160 },
+  forest: { x: 1525, y: 628 },
 };
 
 /** 朝に目覚める場所（小屋の中、ベッドの横） */

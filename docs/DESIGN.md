@@ -173,13 +173,20 @@ docs/concept/      Ronnie のイメージ絵（村・ウシ・ドラゴン・モ
 - **夜に調べたとき**：仲間が話す物（噴水・止まり木・テーブル）を、仲間が眠っている時間に調べると、主人公が「…〜のようだ」と感想を言う（`story.ts` の `LOOK_NIGHT`）。
 - **なかまの絵**：会話の欄と同じ顔の絵（`assets/portraits/`）にした。
 
+### v0.8.4 森の入り口（2026-11-20 Ronnie 指示）
+
+- **森エリア**：Ronnie の絵（`docs/concept/forest_entrance.jpg`）を `tools/prepare_forest.py` で 1000x615 にした（`assets/maps/forest.jpg`）。村の森の立て札の右の小道を上へ歩くと入り、森の下の端へ歩くと村に戻る。
+- 奥へ続く道を正面から見た絵なので、歩けるのは手前の道と倒木の前の草地だけ。人物は 1.25 倍で描き、そのぶん引いて映す（画面では外と同じ大きさ）。道の上の端を調べると「森の奥は絵ができたら行ける」と出る。
+- **倒木で薪**：左の倒木を調べて「倒木から薪を取る」（30分）で薪が1本。【仮】1日3本まで（朝になるとまた取れる）。
+- 拾える薪・マナの絵は、あとで Ronnie が用意する。
+
 ### 素材の差し込み口
 
 ファイルを置くだけで使われ、無ければ代わりの表示で進む（`public/assets/README.md`）。
 
 | 種類 | 置き場所 | 無いとき |
 |---|---|---|
-| 背景 | `assets/maps/village.jpg` | 草色の無地 |
+| 背景 | `assets/maps/village.jpg`・`hut.jpg`・`forest.jpg` | 草色の無地 |
 | 顔画像 | `assets/portraits/player.png`・`moku.png`・`momo.png` | ドット絵を拡大して表示 |
 | ムービー | `assets/movies/opening.mp4`・`dragon-arrival.mp4` | 「MOVIE（未設定）」の札を出して先へ |
 

@@ -613,7 +613,7 @@ function updateField(dt: number): void {
     if (game.player.area === 'village') {
       const z = cycleZoom();
       toast(['ふだんの見え方', '少し引いた見え方', '村全体の見え方'][z] + '（Q で切り替え）', 'zoom');
-    } else toast('建物の中では引いて見られません。', 'zoom');
+    } else toast(game.player.area === 'forest' ? '森の中では引いて見られません。' : '建物の中では引いて見られません。', 'zoom');
   }
   if (wasPressed('ok')) interact();
   else if (wasPressed('menu', 'cancel')) menu = { kind: 'main', idx: 0 };

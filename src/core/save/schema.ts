@@ -70,6 +70,7 @@ export function migrate(raw: unknown): SaveFile | null {
       barrelPure: typeof g.water?.barrelPure === 'number' ? g.water.barrelPure : base.water.barrelPure,
     },
     body: { ...base.body, ...(g.body ?? {}) },
+    forest: { ...base.forest, ...(g.forest ?? {}) },
     forge: { ...base.forge, ...(g.forge ?? {}) },
     companions: {
       moku: { ...base.companions.moku, ...(g.companions?.moku ?? {}), ...(schema < 2 ? { x: base.companions.moku.x, y: base.companions.moku.y } : {}) },

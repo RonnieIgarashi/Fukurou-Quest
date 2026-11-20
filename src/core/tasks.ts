@@ -1,7 +1,7 @@
 // タスク（行動）。実行すると効果を反映し、所要時間ぶん advance() で時間をまとめて進める。
-import { formatClock, minuteOfDay } from './clock.js';
+import { dayOf, formatClock, minuteOfDay } from './clock.js';
 import { Spot } from './map.js';
-import { CropId, CROPS, FARM_MANA_PER_PLOT_PER_DAY, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
+import { CropId, CROPS, FARM_MANA_PER_PLOT_PER_DAY, FOREST, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
 import { advance, GameEvent, sleepUntilMorning } from './sim.js';
 import { FARM_MANA, GameState, MANA_IDS, MANA_NAMES } from './state.js';
 
@@ -50,6 +50,12 @@ export function carriedWater(s: GameState): number {
 export function harvestYield(crop: CropId, pureDays: number): number {
   const c = CROPS[crop];
   return c.yield + Math.round(c.yield * WATER.PURE_YIELD_BONUS * Math.min(1, pureDays / c.days));
+}
+
+/** 今日、倒木からあと何本の薪を取れるか */
+export function woodLeft(s: GameState): number {
+  const taken = s.forest.woodDay === dayOf(s.clock) ? s.forest.woodTaken : 0;
+  return Math.max(0, FOREST.WOOD_PER_DAY - taken);
 }
 
 function canSleep(s: GameState): boolean {
@@ -154,6 +160,16 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
         { id: 'lookBarrel', label: '様子を見る', minutes: 0, disabled: null },
       ];
     }
+    case 'log':
+      return [
+        {
+          id: 'gatherWood',
+          label: `倒木から薪を取る（今日あと${woodLeft(s)}本）`,
+          minutes: TASK_MINUTES.gatherWood,
+          disabled: woodLeft(s) <= 0 ? '今日はもう十分に取った（また明日）' : null,
+        },
+        { id: 'lookLog', label: '様子を見る', minutes: 0, disabled: null },
+      ];
     // 出入り・見るだけの場所はタスクを持たない（main.ts が扱う）
     case 'enter':
     case 'exit':
@@ -261,6 +277,15 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     p.fed = true;
     pass(TASK_MINUTES.feedMana);
     messages.push(`地・火・風のマナを${FARM_MANA_PER_PLOT_PER_DAY}つずつ、畑にあげた。（のこり ${manaLine(s)}）`);
+  } else if (id === 'gatherWood') {
+    const day = dayOf(s.clock);
+    if (s.forest.woodDay !== day) s.forest = { woodDay: day, woodTaken: 0 };
+    s.forest.woodTaken += FOREST.WOOD_PER_GATHER;
+    s.inv.goods.wood += FOREST.WOOD_PER_GATHER;
+    pass(TASK_MINUTES.gatherWood);
+    messages.push(`倒木の枝を折って、薪を${FOREST.WOOD_PER_GATHER}本手に入れた。（薪 ${s.inv.goods.wood}）`);
+  } else if (id === 'lookLog') {
+    messages.push('古い倒木だ。よく乾いていて、薪にちょうどいい。');
   } else if (id === 'drink') {
     s.water.barrelPure -= WATER.DRINK;
     s.body.thirst = 0;

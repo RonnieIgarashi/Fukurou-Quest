@@ -33,6 +33,7 @@ export const TASK_MINUTES = {
   drink: 5, // 水を飲む
   water: 10, // 畑に水をやる
   feedMana: 5, // 畑にマナをあげる
+  gatherWood: 30, // 森の倒木から薪を取る
 } as const;
 
 export type CropId = 'bean' | 'wheat';
@@ -125,3 +126,9 @@ export const NAME_MAX = 6;
 
 /** 【仮】セーブスロットの数 */
 export const SAVE_SLOTS = 3;
+
+/** 【仮】森の倒木から取れる薪（1回に取れる数・1日に取れる数。2026-11-20） */
+export const FOREST = {
+  WOOD_PER_GATHER: 1,
+  WOOD_PER_DAY: 3,
+} as const;

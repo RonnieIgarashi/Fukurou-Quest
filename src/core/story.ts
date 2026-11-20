@@ -52,9 +52,10 @@ export const LOOK: Record<string, Line[]> = {
   memorial: [{ speaker: 'player', text: '慰霊碑、つまり昔のお墓だな。どうやら100年前に、ドラゴンによってこの村は滅びたらしい。' }],
   cart: [{ speaker: 'player', text: '古い荷車だ。特にしばらく使う予定はなさそうだ。' }],
   fountain: [{ speaker: 'moku', text: '噴水があるよ。水のきらめきがきれいだね。' }],
-  forestGate: [
-    { speaker: 'player', text: 'この先は深い森だ。薪やマナを探しに行ける。' },
-    { speaker: 'narration', text: '（森エリアは、マップの絵ができたら行けるようになります）' },
+  forestGate: [{ speaker: 'player', text: '森の入り口の立て札だ。右の小道から森に入れる。薪やマナを探しに行こう。' }],
+  forestPath: [
+    { speaker: 'player', text: '道が森の奥へ続いている。' },
+    { speaker: 'narration', text: '（森の奥は、絵ができたら行けるようになります）' },
   ],
   wastelandSign: [
     { speaker: 'player', text: '立て札だ。この先は荒野らしい。' },
