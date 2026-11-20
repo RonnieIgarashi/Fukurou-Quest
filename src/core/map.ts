@@ -647,7 +647,8 @@ const FOREST: Area = {
   charScale: 1.25,
   // 道の幅の細くなり方に合わせて、手前は大きく、奥ほど小さく
   // 2026-11-20 Ronnie「奥の縮小が強すぎて絵の遠近とちぐはぐ」で 0.45 → 0.72 に和らげた
-  depth: { far: 222, farScale: 0.72, near: 615, nearScale: 1.25 },
+  // 同日、手前が小さすぎると言われ 1.25 → 1.5 に
+  depth: { far: 222, farScale: 0.72, near: 615, nearScale: 1.5 },
 };
 
 export const AREAS: Record<AreaId, Area> = { village: VILLAGE, hut: HUT, smithy: SMITHY, forest: FOREST };
