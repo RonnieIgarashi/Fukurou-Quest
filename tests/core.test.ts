@@ -10,6 +10,8 @@ import { advance, checkBedtime, mokuAsleep, momoAsleep, sleepUntilMorning } from
 import { createGame } from '../src/core/state.js';
 import { LOOK, lookLines } from '../src/core/story.js';
 import { inventoryItems, optionsFor, runItemAction, runTask, woodLeft } from '../src/core/tasks.js';
+import { dropPickups, FORAGE_ZONES, pickupAt, takePickup } from '../src/core/forage.js';
+import { FORAGE } from '../src/core/params.js';
 
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
 const plotSpot = (i: number): Spot => spotAt('village', (PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
@@ -91,7 +93,7 @@ test('マナは朝に勝手に使われない。あげていないと育たな�
   assert.equal(g.plots[1].growth, 0);
   assert.equal(g.plots[1].stalled, true);
   assert.deepEqual(g.inv.mana, before);
-  assert.ok(events.some((e) => e.kind === 'message' && e.text.includes('マナが無く')));
+  assert.ok(!events.some((e) => e.kind === 'message')); // 朝に畑の知らせは出さない（畑に行けば分かる）
 });
 
 test('マナが足りないと、畑にあげられない。あげたマナは育つまで土に残る', () => {
@@ -110,7 +112,7 @@ test('マナが足りないと、畑にあげられない。あげたマナは�
   const events = sleepUntilMorning(g);
   assert.equal(g.plots[2].dry, true);
   assert.equal(g.plots[2].fed, true);
-  assert.ok(events.some((e) => e.kind === 'message' && e.text.includes('水が無く')));
+  assert.ok(!events.some((e) => e.kind === 'message'));
   g.water.carried.river = 1;
   runTask(g, spot, 'water:river');
   sleepUntilMorning(g);
@@ -451,4 +453,54 @@ test('森：奥まで歩けて、奥ほど人物が小さい。いちばん奥�
   assert.ok(charScaleAt('forest', 400) < charScaleAt('forest', 600));
   assert.equal(charScaleAt('village', 900), 1);
   assert.equal(spotAt('forest', 487, 215)?.id, 'forestPath');
+});
+
+test('拾える物：浜辺に水のマナと魚、荒野の入り口に地のマナ、橋の先に風のマナが、1日に決まった数だけ落ち、たまりすぎない', () => {
+  const g = createGame('テスト');
+  assert.ok(g.pickups.length > 0); // 1日目の朝から落ちている
+  g.pickups = [];
+  dropPickups(g, 2, 0);
+  dropPickups(g, 2, 1);
+  const count = (k: string) => g.pickups.filter((p) => p.kind === k).length;
+  for (const [k, n] of Object.entries(FORAGE.PER_DAY)) assert.equal(count(k), n, k);
+  for (const p of g.pickups) {
+    assert.equal(footFree('village', p.x, p.y), true);
+    const zone = Object.values(FORAGE_ZONES).find((z) => z.kinds.includes(p.kind))!;
+    assert.ok(zone.poly.length > 0);
+  }
+  // 拾わずに何日たっても、種類ごとに上限まで
+  for (let d = 0; d < 5; d++) sleepUntilMorning(g);
+  advance(g, 9 * 60);
+  for (const k of Object.keys(FORAGE.PER_DAY)) assert.ok(count(k) <= FORAGE.MAX_ON_GROUND, k);
+  // 拾う
+  const p = g.pickups.find((q) => q.kind === 'mana:earth')!;
+  const before = g.inv.mana.earth;
+  g.player.area = 'village';
+  const i = pickupAt(g, p.x, p.y);
+  assert.ok(i >= 0);
+  assert.ok(takePickup(g, i)?.includes('地のマナ'));
+  assert.equal(g.inv.mana.earth, before + 1);
+});
+
+test('同じ日には、落ちる場所はいつも同じ（一度に進めても1分ずつでも）', () => {
+  const a = createGame('テスト');
+  const b = createGame('テスト');
+  dropPickups(a, 5, 0);
+  dropPickups(b, 5, 0);
+  assert.deepEqual(a.pickups, b.pickups);
+});
+
+test('リンゴの木：もぐと持ち物に入り、毎朝いくつか実る。食べると空腹が減る', () => {
+  const g = createGame('テスト');
+  const tree = spotAt('village', 1220, 630)!;
+  assert.equal(tree.kind, 'appleTree');
+  for (let i = 0; i < 12; i++) runTask(g, tree, 'pickApple');
+  assert.equal(g.inv.goods.apple, 12);
+  assert.ok(optionsFor(g, tree)[0].disabled);
+  sleepUntilMorning(g);
+  assert.equal(g.apples.filter(Boolean).length, FORAGE.APPLES_PER_DAY);
+  g.body.hunger = 50;
+  runItemAction(g, 'goods:apple', 'eat');
+  assert.equal(g.inv.goods.apple, 11);
+  assert.ok(g.body.hunger < 50);
 });

@@ -1,6 +1,7 @@
 // ゲームの状態。セーブデータにはこの形がそのまま入る（DOM に依存しない）。
 import { START_TIME } from './clock.js';
-import { AreaId, HOME, PLOTS } from './map.js';
+import { APPLES, AreaId, HOME, PLOTS } from './map.js';
+import { dropPickups, Pickup } from './forage.js';
 import { CropId, GoodsId, START_INVENTORY } from './params.js';
 
 export type ManaId = 'white' | 'earth' | 'water' | 'fire' | 'wind';
@@ -63,6 +64,10 @@ export interface GameState {
   water: { carried: { river: number; pure: number }; barrelPure: number };
   /** からだの具合（0〜100。大きいほど渇いて・空いている） */
   body: { thirst: number; hunger: number };
+  /** 村に落ちている物（拾える。forage.ts） */
+  pickups: Pickup[];
+  /** リンゴの木の実（APPLES の番号ごとに、なっているか） */
+  apples: boolean[];
   /** 森の倒木。woodDay の日に woodTaken 本取った（日が変わると、また取れる） */
   forest: { woodDay: number; woodTaken: number };
   /** 炉。queue は変化中の白のマナ1つずつの残り分、ready は取り出せる火のマナ */
@@ -79,7 +84,7 @@ export function newPlot(): Plot {
 }
 
 export function createGame(playerName: string): GameState {
-  return {
+  const g: GameState = {
     playerName,
     clock: START_TIME,
     player: { area: 'village', x: HOME.x, y: HOME.y, dir: 'down' },
@@ -92,6 +97,8 @@ export function createGame(playerName: string): GameState {
     plots: PLOTS.map(newPlot),
     water: { carried: { river: 0, pure: 0 }, barrelPure: 0 },
     body: { thirst: 0, hunger: 0 },
+    pickups: [],
+    apples: APPLES.map(() => true),
     forest: { woodDay: 0, woodTaken: 0 },
     forge: { queue: [], ready: 0 },
     companions: {
@@ -101,4 +108,7 @@ export function createGame(playerName: string): GameState {
     flags: {},
     playSeconds: 0,
   };
+  // 1日目の朝の落とし物（浜辺・荒野の入り口・橋の先）
+  dropPickups(g, 1, 0);
+  return g;
 }

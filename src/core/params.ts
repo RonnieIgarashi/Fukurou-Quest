@@ -34,6 +34,8 @@ export const TASK_MINUTES = {
   water: 10, // 畑に水をやる
   feedMana: 5, // 畑にマナをあげる
   gatherWood: 30, // 森の倒木から薪を取る
+  pickApple: 5, // リンゴを1つもぐ
+  eat: 10, // 食べる
 } as const;
 
 export type CropId = 'bean' | 'wheat';
@@ -96,13 +98,15 @@ export const BODY = {
 } as const;
 
 /** 素材。【確定】ウシを倒すと落ちる（肉・皮・毛・骨）。薪は森で集める想定 */
-export type GoodsId = 'wood' | 'meat' | 'hide' | 'hair' | 'bone';
+export type GoodsId = 'wood' | 'meat' | 'hide' | 'hair' | 'bone' | 'fish' | 'apple';
 export const GOODS: Record<GoodsId, { name: string }> = {
   wood: { name: '薪' },
   meat: { name: '肉' },
   hide: { name: '皮' },
   hair: { name: '毛' },
   bone: { name: '骨' },
+  fish: { name: '魚' },
+  apple: { name: 'リンゴ' },
 };
 /** 【確定】燃料になるもの（薪・毛・皮）。【仮】使う順番 */
 export const FUELS: GoodsId[] = ['wood', 'hair', 'hide'];
@@ -112,7 +116,7 @@ export const START_INVENTORY = {
   seeds: { bean: 4, wheat: 2 },
   crops: { bean: 0, wheat: 0 },
   mana: { white: 8, earth: 6, water: 6, fire: 0, wind: 6 },
-  goods: { wood: 6, meat: 0, hide: 0, hair: 0, bone: 0 },
+  goods: { wood: 6, meat: 0, hide: 0, hair: 0, bone: 0, fish: 0, apple: 0 },
 } as const;
 
 /** 【仮】ももっちゅが村にやってくる日時 */
@@ -131,4 +135,23 @@ export const SAVE_SLOTS = 3;
 export const FOREST = {
   WOOD_PER_GATHER: 1,
   WOOD_PER_DAY: 3,
+} as const;
+
+/**
+ * 【仮】村で拾える物とリンゴ（2026-11-21）。
+ * 畑は1区画が1日育つのに地・火・風を1つずつ使う。地・風が1日2つずつ拾えると、拾うだけで2区画をずっと育てられる
+ * （最初に持っている6つずつを足せば、しばらくは3〜4区画）。水のマナは樽の浄化（飲み水20回・水やり10回ぶん）に使うので1日1つ。
+ * 拾わずにいても、種類ごとに MAX_ON_GROUND までしかたまらない（毎日来なくても損をしすぎないように）
+ */
+export const FORAGE = {
+  PER_DAY: { 'mana:water': 1, fish: 2, 'mana:earth': 2, 'mana:wind': 2 } as Record<string, number>,
+  MAX_ON_GROUND: 3,
+  /** 昼の落とし物の時刻 */
+  NOON: 14 * MINUTES_PER_HOUR,
+  /** 拾える距離（足元から） */
+  REACH: 26,
+  /** リンゴは毎朝この数だけ実る（木には12個まで） */
+  APPLES_PER_DAY: 2,
+  /** リンゴを食べると減る空腹 */
+  APPLE_HUNGER: 25,
 } as const;

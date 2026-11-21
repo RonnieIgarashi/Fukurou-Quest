@@ -71,6 +71,8 @@ export function migrate(raw: unknown): SaveFile | null {
     },
     body: { ...base.body, ...(g.body ?? {}) },
     forest: { ...base.forest, ...(g.forest ?? {}) },
+    pickups: Array.isArray(g.pickups) ? g.pickups : base.pickups,
+    apples: Array.isArray(g.apples) && g.apples.length === base.apples.length ? g.apples : base.apples,
     forge: { ...base.forge, ...(g.forge ?? {}) },
     companions: {
       moku: { ...base.companions.moku, ...(g.companions?.moku ?? {}), ...(schema < 2 ? { x: base.companions.moku.x, y: base.companions.moku.y } : {}) },

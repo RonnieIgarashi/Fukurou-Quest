@@ -23,6 +23,12 @@
 
 煙・水しぶき・もや・火の粉は絵を使わず、`src/view/particles.ts` が粒（パーティクル）で描きます。
 
+## アイテム `items/`
+
+Ronnie の一覧絵（`docs/concept/items.webp`）から `tools/extract_items.py` で切り抜いた PNG（背景は透明）。
+`mana-water`・`mana-fire`・`mana-white`・`mana-earth`・`mana-wind`・`wood`・`hide`・`hair`・`water`・`seed-wheat`・`bean`・`bread`・`meat`・`fish`・`apple`。
+無いときは、マナは色の玉、持ち物は文字だけで表示する。
+
 ## 顔画像 `portraits/`
 
 会話のときに左上の枠（正方形）に出ます。PNG、正方形（256×256 程度を推奨。縮小して表示します）。

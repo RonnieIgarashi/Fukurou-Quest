@@ -1,13 +1,14 @@
 // フィールドの描画：背景の絵 → 水の動き・畑 → 物と人物（足元の y で前後を決める。絵の建物や木は切り抜きを手前に重ねる）
 // → 時刻の光 → 周辺減光。座標はエリアの絵の px（ワールド単位）。画面には 800x450 の範囲を映す。
 import { hourFloat } from '../core/clock.js';
-import { AreaId, AREAS, charScale, charScaleAt, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
+import { APPLES, AreaId, AREAS, charScale, charScaleAt, Clear, inPoly, Occluder, PEN, PLOTS, Poly, WASTE, WINDOWS } from '../core/map.js';
 import { CROPS, CropId } from '../core/params.js';
 import { mokuAsleep, momoAsleep } from '../core/sim.js';
 import { Companion, Dir, GameState, Plot } from '../core/state.js';
 import { Ctx, drawAtFeet, drawShadow, makeCanvas, rng, SPRITE_SCALE, spriteImage, VIEW_H, VIEW_W } from './gfx.js';
 import { interiorImage, SMITHY_FIRE } from './interior.js';
-import { art as spriteArt, companionPose, COMPANION_BODY, COMPANION_SCALE, drawArtAtCenter, COW_SCALE, cowPose, drawArtAtFeet, LEAF_COUNT } from './art.js';
+import { PICKUP_NAMES } from '../core/forage.js';
+import { art as spriteArt, itemArt, companionPose, COMPANION_BODY, COMPANION_SCALE, drawArtAtCenter, COW_SCALE, cowPose, drawArtAtFeet, LEAF_COUNT } from './art.js';
 import { Emitter, Particles, rand, smoke } from './particles.js';
 import { MOKU, MOMO, PLAYER, ZZZ } from './sprites.js';
 
@@ -962,6 +963,44 @@ function drawFountain(ctx: Ctx, t: number): void {
   fountainFx.draw(ctx);
 }
 
+/** リンゴの木の実（Ronnie のリンゴの絵。木といっしょに揺れる） */
+function drawApples(ctx: Ctx, s: GameState, t: number): void {
+  const img = itemArt('apple');
+  if (!img) return;
+  const h = 14;
+  const w = (img.naturalWidth / img.naturalHeight) * h;
+  APPLES.forEach((a, i) => {
+    if (!s.apples[i]) return;
+    const sw = SWAYS[a.tree];
+    const dx = sw ? swayAt(sw, a.y, t) : 0;
+    ctx.drawImage(img, a.x + dx - w / 2, a.y - h / 2, w, h);
+  });
+}
+
+/** 落ちている物（拾える）。ふわっと上下して、ときどききらりと光る */
+function pickupDrawable(kind: keyof typeof PICKUP_NAMES, x: number, y: number, t: number): Drawable {
+  const icon = kind === 'fish' ? 'fish' : `mana-${kind.slice(5)}`;
+  return {
+    y,
+    x,
+    draw: (c) => {
+      const img = itemArt(icon);
+      const bob = kind === 'fish' ? 0 : Math.sin(t * 2.4 + x * 0.05) * 1.5 - 2;
+      drawShadow(c, x, y, 16);
+      if (img) {
+        const h = kind === 'fish' ? 15 : 18;
+        const w = (img.naturalWidth / img.naturalHeight) * h;
+        c.drawImage(img, x - w / 2, y - h + bob, w, h);
+      }
+      const k = Math.max(0, Math.sin(t * 1.7 + x));
+      if (k > 0.9) {
+        c.fillStyle = `rgba(255, 255, 255, ${(k - 0.9) * 8})`;
+        c.fillRect(x + 3, y - 12 + bob, 1.6, 1.6);
+      }
+    },
+  };
+}
+
 function drawRiver(ctx: Ctx, t: number): void {
   if (!riverMask || !riverLayer) return;
   const lc = riverLayer.getContext('2d')!;
@@ -1119,6 +1158,8 @@ export function drawWorld(ctx: Ctx, s: GameState, anim: PlayerAnim, t: number, c
     // 風に揺れる木
     for (const sw of a?.sways ?? []) if (inView(sw)) drawSwayed(ctx, sw, sw.sway!, t);
     drawWater(ctx, t, cam);
+    drawApples(ctx, s, t);
+    for (const p of s.pickups) items.push(pickupDrawable(p.kind, p.x, p.y, t));
     s.plots.forEach((p, i) => drawPlot(ctx, i, p, items));
     for (const c of cows) items.push(cowDrawable(c, t));
     // 噴水の水しぶき（噴水の絵の切り抜きのすぐ手前）

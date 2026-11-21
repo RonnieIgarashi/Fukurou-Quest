@@ -15,6 +15,27 @@ export function art(name: string): HTMLImageElement | null {
   return img.complete && img.naturalWidth > 0 ? img : null;
 }
 
+/** アイテムの絵（Ronnie の素材。tools/extract_items.py が作る public/assets/items/<id>.png） */
+const itemCache = new Map<string, HTMLImageElement>();
+
+export function itemArt(id: string): HTMLImageElement | null {
+  let img = itemCache.get(id);
+  if (!img) {
+    img = new Image();
+    img.src = `assets/items/${id}.png`;
+    itemCache.set(id, img);
+  }
+  return img.complete && img.naturalWidth > 0 ? img : null;
+}
+
+/** 絵を、縦横比を保って w×h の枠の真ん中に収める大きさと位置 */
+export function fitBox(img: HTMLImageElement, x: number, y: number, w: number, h: number): [number, number, number, number] {
+  const k = Math.min(w / img.naturalWidth, h / img.naturalHeight);
+  const dw = img.naturalWidth * k;
+  const dh = img.naturalHeight * k;
+  return [x + (w - dw) / 2, y + (h - dh) / 2, dw, dh];
+}
+
 /** 足元（x, y）を基準に、k 倍で描く。mirror で左右反転 */
 export function drawArtAtFeet(ctx: Ctx, img: HTMLImageElement, x: number, y: number, k: number, mirror = false, squashY = 1): void {
   const w = img.naturalWidth * k;

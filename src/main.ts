@@ -6,6 +6,7 @@ import { BODY, NAME_MAX, TIME, WATER } from './core/params.js';
 import { LocalSaveStore, MemoryKeyValue, slotIds } from './core/save/localStore.js';
 import { newSaveFile } from './core/save/schema.js';
 import { SaveStore, SaveSummary } from './core/save/store.js';
+import { pickupAt, takePickup } from './core/forage.js';
 import { advance, checkBedtime, GameEvent, mokuAsleep, momoAsleep } from './core/sim.js';
 import { createGame, Dir, GameState, MANA_IDS, ManaId } from './core/state.js';
 import { fillName, Line, lookLines as lookLinesFor, Speaker, STORY, STORY_MOVIE, StoryId } from './core/story.js';
@@ -15,6 +16,7 @@ import { BASE_H, BASE_W, Ctx, spriteImage, VIEW_W } from './view/gfx.js';
 import { movieExists, playMovie, portrait, preloadPortraits } from './view/media.js';
 import { drawCursor, drawFrame, Screen } from './view/screen.js';
 import { MOKU, MOMO, PLAYER, SpriteDef } from './view/sprites.js';
+import { fitBox, itemArt } from './view/art.js';
 import { cameraFor, currentZoom, cycleZoom, darkness, drawWorld, PlayerAnim, updateCows } from './view/world.js';
 
 // ---------------------------------------------------------------- 準備
@@ -550,7 +552,22 @@ function moveTo(area: AreaId, pos: { x: number; y: number }, dir: Dir): void {
   enteredAt = t;
 }
 
+/** 足元か目の前に落ちている物（村） */
+function frontPickup(): number {
+  const p = game.player;
+  const [dx, dy] = DIRS[p.dir];
+  const k = 18 * charScaleAt(p.area, p.y);
+  const i = pickupAt(game, p.x + dx * k, p.y - 3 + dy * k);
+  return i >= 0 ? i : pickupAt(game, p.x, p.y - 3);
+}
+
 function interact(): void {
+  const pick = frontPickup();
+  if (pick >= 0) {
+    const msg = takePickup(game, pick);
+    if (msg) toast(msg, 'pickup');
+    return;
+  }
   const who = talkTarget();
   if (who) {
     const asleep = who === 'moku' ? mokuAsleep(game.clock) : momoAsleep(game.clock);
@@ -859,7 +876,10 @@ function drawHud(ctx: Ctx, clock: number): void {
   drawFrame(ctx, x0, 6, w, 18, 0.8);
   MANA_IDS.forEach((m, i) => {
     const x = x0 + 6 + i * 30;
-    drawOrb(ctx, x, 11, MANA_COLORS[m]);
+    // Ronnie のマナの絵（読み込み前は色の玉）
+    const img = itemArt(`mana-${m}`);
+    if (img) screen.image(img, ...fitBox(img, x - 2, 8, 11, 11));
+    else drawOrb(ctx, x, 11, MANA_COLORS[m]);
     screen.text(x + 10, 10, String(game.inv.mana[m]), { size: 9 });
   });
 }
@@ -980,7 +1000,9 @@ function drawMenu(ctx: Ctx): void {
       const y = 68 + i * 14;
       const sel = i === m.idx;
       if (sel && m.act === null) drawCursor(ctx, 46, y + 3, t);
-      screen.text(56, y, it.name, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
+      const img = it.icon ? itemArt(it.icon) : null;
+      if (img) screen.image(img, ...fitBox(img, 56, y - 1, 13, 13));
+      screen.text(72, y, it.name, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
       screen.text(280, y, it.count, { size: 10, align: 'right', color: '#b8b0e0' });
     });
     screen.text(52, 68 + items.length * 14 + 2, `炉 変化中${game.forge.queue.length}・取り出せる火${game.forge.ready}　樽のきれいな水 ${game.water.barrelPure}/${WATER.BARREL}`, {
@@ -1048,7 +1070,7 @@ function drawField(ctx: Ctx): void {
   drawHud(ctx, clock);
 
   // 調べられる物の前では、主人公の頭上に案内を出す
-  if (!menu && !busy && !beats.length && (frontSpot() || talkTarget())) {
+  if (!menu && !busy && !beats.length && (frontSpot() || talkTarget() || frontPickup() >= 0)) {
     // フィールド（800x450）の座標を UI（384x216）の座標に直す
     const cam = cameraFor(game);
     const k = BASE_W / (VIEW_W * currentZoom());

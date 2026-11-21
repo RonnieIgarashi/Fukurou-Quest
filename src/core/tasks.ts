@@ -1,7 +1,8 @@
 // タスク（行動）。実行すると効果を反映し、所要時間ぶん advance() で時間をまとめて進める。
 import { dayOf, formatClock, minuteOfDay } from './clock.js';
 import { Spot } from './map.js';
-import { CropId, CROPS, FARM_MANA_PER_PLOT_PER_DAY, FOREST, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
+import { applesOnTree, pickApple } from './forage.js';
+import { CropId, CROPS, FARM_MANA_PER_PLOT_PER_DAY, FORAGE, FOREST, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
 import { advance, GameEvent, sleepUntilMorning } from './sim.js';
 import { FARM_MANA, GameState, MANA_IDS, MANA_NAMES } from './state.js';
 
@@ -160,6 +161,13 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
         { id: 'lookBarrel', label: '様子を見る', minutes: 0, disabled: null },
       ];
     }
+    case 'appleTree': {
+      const n = applesOnTree(s);
+      return [
+        { id: 'pickApple', label: `リンゴをもぐ（木に${n}個）`, minutes: TASK_MINUTES.pickApple, disabled: n <= 0 ? 'いまは実がない（毎朝いくつか実る）' : null },
+        { id: 'lookApple', label: '様子を見る', minutes: 0, disabled: null },
+      ];
+    }
     case 'log':
       return [
         {
@@ -277,6 +285,13 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     p.fed = true;
     pass(TASK_MINUTES.feedMana);
     messages.push(`地・火・風のマナを${FARM_MANA_PER_PLOT_PER_DAY}つずつ、畑にあげた。（のこり ${manaLine(s)}）`);
+  } else if (id === 'pickApple') {
+    pickApple(s);
+    pass(TASK_MINUTES.pickApple);
+    messages.push(`リンゴを1つもいだ。（リンゴ ${s.inv.goods.apple}）`);
+  } else if (id === 'lookApple') {
+    const n = applesOnTree(s);
+    messages.push(n > 0 ? `リンゴの木だ。赤い実が${n}個なっている。` : 'リンゴの木だ。いまは実がない。毎朝いくつか実るようだ。');
   } else if (id === 'gatherWood') {
     const day = dayOf(s.clock);
     if (s.forest.woodDay !== day) s.forest = { woodDay: day, woodTaken: 0 };
@@ -327,6 +342,8 @@ export interface ItemAction {
 
 export interface InventoryItem {
   id: string;
+  /** 絵（public/assets/items/<icon>.png。無ければ文字だけ） */
+  icon: string | null;
   name: string;
   count: string;
   actions: ItemAction[];
@@ -339,6 +356,7 @@ export function inventoryItems(s: GameState): InventoryItem[] {
   if (s.water.carried.pure > 0)
     items.push({
       id: 'water:pure',
+      icon: 'water',
       name: 'きれいな水',
       count: `${s.water.carried.pure}杯`,
       actions: [
@@ -349,6 +367,7 @@ export function inventoryItems(s: GameState): InventoryItem[] {
   if (s.water.carried.river > 0)
     items.push({
       id: 'water:river',
+      icon: 'water',
       name: '川の水',
       count: `${s.water.carried.river}杯`,
       actions: [
@@ -356,33 +375,36 @@ export function inventoryItems(s: GameState): InventoryItem[] {
         { id: 'none', label: '畑にやる', disabled: '畑を調べて「水をやる」を選ぶ' },
       ],
     });
+  const CROP_ICON: Record<CropId, { seed: string; crop: string }> = { bean: { seed: 'bean', crop: 'bean' }, wheat: { seed: 'seed-wheat', crop: 'seed-wheat' } };
   for (const c of Object.keys(CROPS) as CropId[]) {
     if (s.inv.seeds[c] > 0)
-      items.push({ id: `seed:${c}`, name: `${CROPS[c].name}の種`, count: `${s.inv.seeds[c]}`, actions: none('耕した畑を調べると、まける') });
+      items.push({ id: `seed:${c}`, icon: CROP_ICON[c].seed, name: `${CROPS[c].name}の種`, count: `${s.inv.seeds[c]}`, actions: none('耕した畑を調べると、まける') });
   }
   for (const c of Object.keys(CROPS) as CropId[]) {
     if (s.inv.crops[c] > 0)
-      items.push({ id: `crop:${c}`, name: CROPS[c].name, count: `${s.inv.crops[c]}`, actions: none('まだ使い道がない（料理やウシのえさは準備中）') });
+      items.push({ id: `crop:${c}`, icon: CROP_ICON[c].crop, name: CROPS[c].name, count: `${s.inv.crops[c]}`, actions: none('まだ使い道がない（料理やウシのえさは準備中）') });
   }
   for (const g of Object.keys(GOODS) as GoodsId[]) {
-    if (s.inv.goods[g] > 0)
-      items.push({
-        id: `goods:${g}`,
-        name: GOODS[g].name,
-        count: `${s.inv.goods[g]}`,
-        actions: none(FUELS.includes(g) ? '鍛冶小屋の炉で燃料に使う' : 'まだ使い道がない'),
-      });
+    if (s.inv.goods[g] <= 0) continue;
+    const actions =
+      g === 'apple'
+        ? [{ id: 'eat', label: '食べる', disabled: null }]
+        : g === 'fish'
+          ? none('焼けば食べられそうだ（料理は準備中）')
+          : none(FUELS.includes(g) ? '鍛冶小屋の炉で燃料に使う' : 'まだ使い道がない');
+    items.push({ id: `goods:${g}`, icon: g === 'bone' ? null : g, name: GOODS[g].name, count: `${s.inv.goods[g]}`, actions });
   }
-  items.push({
-    id: 'mana',
-    name: 'マナ',
-    count: MANA_IDS.map((m) => `${MANA_NAMES[m]}${s.inv.mana[m]}`).join(' '),
-    actions: [
-      { id: 'none', label: '畑にあげる', disabled: '畑を調べて「マナをあげる」を選ぶ（地・火・風）' },
-      { id: 'none', label: '炉に入れる', disabled: '鍛冶小屋の炉を調べる（白のマナ）' },
-      { id: 'none', label: '水を浄化する', disabled: '水くみ場の樽を調べる（水のマナ）' },
-    ],
-  });
+  const MANA_USE: Record<string, ItemAction[]> = {
+    white: [{ id: 'none', label: '炉に入れる', disabled: '鍛冶小屋の炉を調べる（火のマナに変わる）' }],
+    fire: [{ id: 'none', label: '畑にあげる', disabled: '畑を調べて「マナをあげる」を選ぶ（地・火・風）' }],
+    earth: [{ id: 'none', label: '畑にあげる', disabled: '畑を調べて「マナをあげる」を選ぶ（地・火・風）' }],
+    wind: [{ id: 'none', label: '畑にあげる', disabled: '畑を調べて「マナをあげる」を選ぶ（地・火・風）' }],
+    water: [{ id: 'none', label: '水を浄化する', disabled: '水くみ場の樽を調べる' }],
+  };
+  for (const m of MANA_IDS) {
+    if (s.inv.mana[m] > 0)
+      items.push({ id: `mana:${m}`, icon: `mana-${m}`, name: `${MANA_NAMES[m]}のマナ`, count: `${s.inv.mana[m]}`, actions: MANA_USE[m] });
+  }
   return items;
 }
 
@@ -400,6 +422,11 @@ export function runItemAction(s: GameState, itemId: string, actionId: string): T
     s.body.thirst = 0;
     events = advance(s, TASK_MINUTES.drink);
     messages.push('持っていたきれいな水を飲んだ。のどがうるおった。');
+  } else if (itemId === 'goods:apple' && actionId === 'eat') {
+    s.inv.goods.apple--;
+    s.body.hunger = Math.max(0, s.body.hunger - FORAGE.APPLE_HUNGER);
+    events = advance(s, TASK_MINUTES.eat);
+    messages.push('リンゴをかじった。甘ずっぱくて、おいしい！');
   }
   return { messages, events, minutes: s.clock - before };
 }

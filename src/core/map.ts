@@ -14,7 +14,7 @@ export type AreaId = 'village' | 'hut' | 'smithy' | 'forest';
  * - look：見るだけ（説明の台詞は story.ts の LOOK）
  * - bed / desk / forge / plot / barrel：タスクを選ぶ（barrel は水くみ場の樽）
  */
-export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot' | 'barrel' | 'log';
+export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot' | 'barrel' | 'log' | 'appleTree';
 
 export interface Spot {
   kind: SpotKind;
@@ -106,6 +106,25 @@ export const PLOTS: readonly { x0: number; y0: number; x1: number; y1: number }[
   { x0: 1150, y0: 708, x1: 1205, y1: 764 },
   { x0: 1214, y0: 708, x1: 1266, y1: 764 },
   { x0: 1275, y0: 708, x1: 1322, y1: 762 },
+];
+
+/**
+ * 畑の奥のリンゴの木の実の位置（絵から測った。tools/prepare_village.py で絵の実は消してある）。
+ * tree は揺れる木（world.ts の SWAYS）の名前
+ */
+export const APPLES: readonly { x: number; y: number; tree: string }[] = [
+  { x: 1143, y: 568, tree: 'orchard1' },
+  { x: 1173, y: 552, tree: 'orchard1' },
+  { x: 1177, y: 586, tree: 'orchard1' },
+  { x: 1234, y: 523, tree: 'orchard2' },
+  { x: 1207, y: 540, tree: 'orchard2' },
+  { x: 1240, y: 554, tree: 'orchard2' },
+  { x: 1203, y: 569, tree: 'orchard2' },
+  { x: 1240, y: 583, tree: 'orchard2' },
+  { x: 1283, y: 564, tree: 'orchard3' },
+  { x: 1298, y: 579, tree: 'orchard3' },
+  { x: 1275, y: 588, tree: 'orchard3' },
+  { x: 1305, y: 599, tree: 'orchard3' },
 ];
 
 /** 牧場の内側（ウシが歩き回る範囲） */
@@ -257,6 +276,7 @@ const VILLAGE: Area = {
   ],
   spots: [
     { spot: { kind: 'enter', id: 'hut' }, poly: rect(992, 622, 1040, 662) },
+    { spot: { kind: 'appleTree' }, poly: rect(1110, 500, 1330, 640) },
     { spot: { kind: 'enter', id: 'smithy' }, poly: rect(1530, 1112, 1626, 1150) },
     { spot: { kind: 'look', id: 'memorial' }, poly: rect(1716, 700, 1852, 800) },
     // 森の入り口（2026-11-20）：立て札の右の道を上へ歩くと森へ入る。立て札は調べられる

@@ -420,6 +420,29 @@ def place_treehouse(out):
 # ---------------------------------------------------------------- 本体
 
 
+# 畑の奥のリンゴの木の実（絵の中の位置）。ゲーム側の src/core/map.ts の APPLES と同じ
+APPLES = [
+    (1143, 568), (1173, 552), (1177, 586),
+    (1234, 523), (1207, 540), (1240, 554), (1203, 569), (1240, 583),
+    (1283, 564), (1298, 579), (1275, 588), (1305, 599),
+]
+
+
+def clear_apples(out):
+    """木に描かれた赤い実を、まわりの葉の塗りで描き直す"""
+    yy, xx = np.mgrid[0:H, 0:W]
+    near = np.zeros((H, W), bool)
+    for x, y in APPLES:
+        near |= (xx - x) ** 2 + (yy - y) ** 2 <= 11 ** 2
+    r, g, b = out[..., 0], out[..., 1], out[..., 2]
+    red = (r > g + 30) & near
+    dark = (lum(out) < 95) & near
+    hole = dilate(red | (dark & dilate(red, 4)), 2) & near
+    leaves = (g > r + 8) & (g > b) & box_mask(1100, 480, 1340, 630)
+    allow = ndimage.binary_erosion(leaves, iterations=2) & ~dilate(hole, 3)
+    return wash_fill(out, hole, allow, ref=leaves & ~hole, sigma=6, seed=11)
+
+
 def main():
     src = load(SRC)
     plate = load(PLATE)
@@ -514,6 +537,9 @@ def main():
     out = wash_fill(out, hole, allow, seed=3)
     rgba, _ = rgba_crop(src, body)
     pass  # 同上
+
+    print('リンゴの木の実：消して、ゲームの中で Ronnie のリンゴの絵を置く（2026-11-21）')
+    out = clear_apples(out)
 
     out = place_treehouse(out)
 

@@ -2,7 +2,8 @@
 // （仕様書の原則「時間更新処理を二重実装しない」）。
 import { dayOf, isPastBedtime, minuteOfDay, nextMorning } from './clock.js';
 import { WAKE } from './map.js';
-import { BODY, CROPS, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
+import { dropPickups, growApples } from './forage.js';
+import { BODY, CROPS, FORAGE, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
 import { GameState } from './state.js';
 import { StoryId } from './story.js';
 
@@ -32,6 +33,9 @@ export function momoAsleep(t: number): boolean {
  * きれいな水で育った日は数えておき、収穫のときに収量が増える。水は毎朝やり直し
  */
 function morning(s: GameState, out: GameEvent[]): void {
+  const day = dayOf(s.clock);
+  growApples(s, day);
+  dropPickups(s, day, 0);
   let stalled = 0;
   let dry = 0;
   for (const p of s.plots) {
@@ -51,10 +55,10 @@ function morning(s: GameState, out: GameEvent[]): void {
     }
     p.watered = 'none';
   }
-  if (dry > 0) out.push({ kind: 'message', text: `水が無く、畑の${dry}区画が育たなかった。毎日、水をやろう。` });
-  if (stalled > 0) out.push({ kind: 'message', text: `マナが無く、畑の${stalled}区画が育たなかった。畑でマナをあげよう。` });
-  const ready = s.plots.filter((p) => p.stage === 'ready').length;
-  if (ready > 0) out.push({ kind: 'message', text: `畑の${ready}区画が収穫できそうだ。` });
+  // 畑の様子は朝に知らせない。畑に行ったときに気づけるように（2026-11-21 Ronnie「朝の通知は不要」）
+  void stalled;
+  void dry;
+  void out;
 }
 
 /** のどの渇き・空腹が1分ぶん進む（眠っている間はゆっくり） */
@@ -82,6 +86,7 @@ function onHour(s: GameState, out: GameEvent[]): void {
   const m = minuteOfDay(s.clock);
   const day = dayOf(s.clock);
   if (m === TIME.MORNING) morning(s, out);
+  if (m === FORAGE.NOON) dropPickups(s, day, 1);
   if (m === TIME.NIGHT) fireStory(s, 'firstNight', out);
   if (!s.companions.momo.met && (day > MOMO_ARRIVAL.day || (day === MOMO_ARRIVAL.day && m >= MOMO_ARRIVAL.minute))) {
     s.companions.momo.met = true;
