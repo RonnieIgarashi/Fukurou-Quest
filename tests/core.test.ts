@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { dayOf, formatClock, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
+import { dayOf, formatClock, minuteOfDay, isNight, isPastBedtime, nextMorning, START_TIME } from '../src/core/clock.js';
 import { AREAS, bridgeDeck, charScaleAt, footFree, HOME, isBlockedAt, nearestFree, PLOTS, Spot, spotAt, WAKE } from '../src/core/map.js';
 import { appendKana, backspace, isValidName, KANA_GRID } from '../src/core/names.js';
 import { BODY, CROPS, FORGE, MINUTES_PER_DAY, TIME, WATER } from '../src/core/params.js';
@@ -11,7 +11,7 @@ import { createGame } from '../src/core/state.js';
 import { LOOK, lookLines } from '../src/core/story.js';
 import { inventoryItems, optionsFor, runItemAction, runTask, woodLeft } from '../src/core/tasks.js';
 import { dropPickups, FORAGE_ZONES, pickupAt, takePickup } from '../src/core/forage.js';
-import { FORAGE } from '../src/core/params.js';
+import { FORAGE, SACK } from '../src/core/params.js';
 
 const at = (day: number, h: number, m = 0) => (day - 1) * MINUTES_PER_DAY + h * 60 + m;
 const plotSpot = (i: number): Spot => spotAt('village', (PLOTS[i].x0 + PLOTS[i].x1) / 2, (PLOTS[i].y0 + PLOTS[i].y1) / 2)!;
@@ -490,17 +490,46 @@ test('同じ日には、落ちる場所はいつも同じ（一度に進めて�
   assert.deepEqual(a.pickups, b.pickups);
 });
 
-test('リンゴの木：もぐと持ち物に入り、毎朝いくつか実る。食べると空腹が減る', () => {
+test('リンゴの木：もぐと持ち物に入り、もいだ所は10日たつとまた実る。食べると空腹が減る', () => {
   const g = createGame('テスト');
   const tree = spotAt('village', 1220, 630)!;
   assert.equal(tree.kind, 'appleTree');
   for (let i = 0; i < 12; i++) runTask(g, tree, 'pickApple');
   assert.equal(g.inv.goods.apple, 12);
   assert.ok(optionsFor(g, tree)[0].disabled);
+  for (let d = 1; d < FORAGE.APPLE_REGROW_DAYS; d++) sleepUntilMorning(g);
+  assert.equal(g.apples.filter(Boolean).length, 0, '9日目まではまだ実らない');
   sleepUntilMorning(g);
-  assert.equal(g.apples.filter(Boolean).length, FORAGE.APPLES_PER_DAY);
+  assert.equal(g.apples.filter(Boolean).length, 12, '10日たった朝に実る');
   g.body.hunger = 50;
   runItemAction(g, 'goods:apple', 'eat');
   assert.equal(g.inv.goods.apple, 11);
   assert.ok(g.body.hunger < 50);
+});
+
+test('落ちている物は、拾わずにいるとマナは2日・魚は1日で消える', () => {
+  const g = createGame('テスト');
+  g.pickups = [];
+  dropPickups(g, 1, 0);
+  const kinds = () => new Set(g.pickups.map((p) => p.kind));
+  assert.ok(kinds().has('fish') || g.pickups.length > 0);
+  const firstFish = g.pickups.filter((p) => p.kind === 'fish');
+  const firstMana = g.pickups.filter((p) => p.kind !== 'fish');
+  sleepUntilMorning(g); // 2日目の朝（1日たった）
+  for (const f of firstFish) assert.ok(!g.pickups.includes(f), '魚は1日で消える');
+  for (const m of firstMana) assert.ok(g.pickups.includes(m), 'マナは1日ではまだ残る');
+  sleepUntilMorning(g); // 3日目の朝（2日たった）
+  for (const m of firstMana) assert.ok(!g.pickups.includes(m), 'マナは2日で消える');
+});
+
+test('【暫定】家の中の布袋：白のマナを1日3つ取り出せ、0時をすぎると補充される', () => {
+  const g = createGame('テスト');
+  const sack = spotAt('hut', 200, 500)!;
+  assert.equal(sack.kind, 'sack');
+  const before = g.inv.mana.white;
+  runTask(g, sack, 'takeWhite');
+  assert.equal(g.inv.mana.white, before + SACK.WHITE_PER_DAY);
+  assert.ok(optionsFor(g, sack)[0].disabled, 'その日のうちはもう取れない');
+  advance(g, MINUTES_PER_DAY - minuteOfDay(g.clock)); // 0時
+  assert.equal(optionsFor(g, sack)[0].disabled, null, '0時をすぎると、また取れる');
 });

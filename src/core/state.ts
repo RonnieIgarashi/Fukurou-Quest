@@ -68,6 +68,10 @@ export interface GameState {
   pickups: Pickup[];
   /** リンゴの木の実（APPLES の番号ごとに、なっているか） */
   apples: boolean[];
+  /** リンゴをもいだ日（APPLES の番号ごと。0 はまだもいでいない） */
+  applePicked: number[];
+  /** 【暫定】家の中の布袋。day の日に taken 個の白のマナを取り出した（日が変わると、また取れる） */
+  sack: { day: number; taken: number };
   /** 森の倒木。woodDay の日に woodTaken 本取った（日が変わると、また取れる） */
   forest: { woodDay: number; woodTaken: number };
   /** 炉。queue は変化中の白のマナ1つずつの残り分、ready は取り出せる火のマナ */
@@ -99,6 +103,8 @@ export function createGame(playerName: string): GameState {
     body: { thirst: 0, hunger: 0 },
     pickups: [],
     apples: APPLES.map(() => true),
+    applePicked: APPLES.map(() => 0),
+    sack: { day: 0, taken: 0 },
     forest: { woodDay: 0, woodTaken: 0 },
     forge: { queue: [], ready: 0 },
     companions: {

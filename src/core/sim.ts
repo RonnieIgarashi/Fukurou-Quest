@@ -2,7 +2,7 @@
 // （仕様書の原則「時間更新処理を二重実装しない」）。
 import { dayOf, isPastBedtime, minuteOfDay, nextMorning } from './clock.js';
 import { WAKE } from './map.js';
-import { dropPickups, growApples } from './forage.js';
+import { dropPickups, expirePickups, growApples } from './forage.js';
 import { BODY, CROPS, FORAGE, MINUTES_PER_HOUR, MOMO_ARRIVAL, MOMO_SLEEP, TIME } from './params.js';
 import { GameState } from './state.js';
 import { StoryId } from './story.js';
@@ -85,6 +85,7 @@ function fireStory(s: GameState, id: StoryId, out: GameEvent[]): void {
 function onHour(s: GameState, out: GameEvent[]): void {
   const m = minuteOfDay(s.clock);
   const day = dayOf(s.clock);
+  expirePickups(s);
   if (m === TIME.MORNING) morning(s, out);
   if (m === FORAGE.NOON) dropPickups(s, day, 1);
   if (m === TIME.NIGHT) fireStory(s, 'firstNight', out);

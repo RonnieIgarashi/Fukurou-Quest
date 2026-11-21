@@ -1,9 +1,10 @@
 // 村で拾える物と、リンゴの木（2026-11-21 Ronnie）。
 // - 浜辺：水のマナと魚、荒野の入り口：地のマナ、西の橋の先（村の左端）：風のマナ が、ときどき落ちている
-// - 畑の奥のリンゴの木：実をもいで収穫できる。毎朝いくつか実る
+// - 畑の奥のリンゴの木：実をもいで収穫できる。もいだ所は FORAGE.APPLE_REGROW_DAYS 日たつと、また実る
+// - 落ちている物は、拾わずにいると FORAGE.LIFE_DAYS 日で消える（マナ2日・魚1日。2026-11-21 Ronnie「無限に貯まると良くない」）
 // 落ちる場所・時刻は日付から決まる（乱数を使わない。一度に進めても1分ずつ進めても同じになるように）。
 import { APPLES, footFree, Poly, inPoly } from './map.js';
-import { FORAGE } from './params.js';
+import { FORAGE, MINUTES_PER_DAY, TIME } from './params.js';
 import type { GameState } from './state.js';
 
 export type PickupKind = 'mana:water' | 'mana:earth' | 'mana:wind' | 'fish';
@@ -12,6 +13,8 @@ export interface Pickup {
   kind: PickupKind;
   x: number;
   y: number;
+  /** 落ちた時刻（clock）。FORAGE.LIFE_DAYS 日たつと消える */
+  at: number;
 }
 
 export const PICKUP_NAMES: Record<PickupKind, string> = {
@@ -59,6 +62,7 @@ function spotIn(poly: Poly, seed: number[]): { x: number; y: number } | null {
  * 1日に落ちる数は FORAGE.PER_DAY（朝と昼に分けて）。拾わずにいても、種類ごとに FORAGE.MAX_ON_GROUND までしかたまらない
  */
 export function dropPickups(s: GameState, day: number, slot: 0 | 1): void {
+  const at = (day - 1) * MINUTES_PER_DAY + (slot === 0 ? TIME.MORNING : FORAGE.NOON);
   let n = 0;
   for (const [zi, zone] of Object.values(FORAGE_ZONES).entries()) {
     for (const [ki, kind] of zone.kinds.entries()) {
@@ -68,11 +72,16 @@ export function dropPickups(s: GameState, day: number, slot: 0 | 1): void {
       const count = slot === 0 ? morning : perDay - morning;
       for (let i = 0; i < count; i++) {
         if (s.pickups.filter((p) => p.kind === kind).length >= FORAGE.MAX_ON_GROUND) break;
-        const at = spotIn(zone.poly, [day, slot, zi, ki, i, n++]);
-        if (at) s.pickups.push({ kind, ...at });
+        const spot = spotIn(zone.poly, [day, slot, zi, ki, i, n++]);
+        if (spot) s.pickups.push({ kind, ...spot, at });
       }
     }
   }
+}
+
+/** 拾われずに LIFE_DAYS 日たった物を消す（毎正時に呼ぶ） */
+export function expirePickups(s: GameState): void {
+  s.pickups = s.pickups.filter((p) => s.clock - p.at < FORAGE.LIFE_DAYS[p.kind] * MINUTES_PER_DAY);
 }
 
 /** (x, y) の近くに落ちている物の番号（無ければ -1） */
@@ -102,23 +111,31 @@ export function takePickup(s: GameState, i: number): string | null {
 
 // ---------------------------------------------------------------- リンゴの木
 
-/** 毎朝、もがれた所に実がなる（決まった数まで） */
+/** 毎朝、もいでから APPLE_REGROW_DAYS 日たった所に、また実がなる（applePicked はもいだ日） */
 export function growApples(s: GameState, day: number): void {
-  const empty = s.apples.map((on, i) => (on ? -1 : i)).filter((i) => i >= 0);
-  empty.sort((a, b) => hash(day, a, 7) - hash(day, b, 7));
-  for (const i of empty.slice(0, FORAGE.APPLES_PER_DAY)) s.apples[i] = true;
+  s.apples.forEach((on, i) => {
+    if (!on && day - (s.applePicked[i] ?? 0) >= FORAGE.APPLE_REGROW_DAYS) s.apples[i] = true;
+  });
 }
 
 export function applesOnTree(s: GameState): number {
   return s.apples.filter(Boolean).length;
 }
 
-/** 実を1つもぐ（いちばん低い所から） */
-export function pickApple(s: GameState): boolean {
+/** いちばん早く、また実る日（木に実が無いときの案内用。もいだ所が無ければ null） */
+export function nextAppleDay(s: GameState): number | null {
+  const days = s.apples.map((on, i) => (on ? Infinity : (s.applePicked[i] ?? 0) + FORAGE.APPLE_REGROW_DAYS));
+  const d = Math.min(...days);
+  return Number.isFinite(d) ? d : null;
+}
+
+/** 実を1つもぐ（いちばん低い所から）。day はもいだ日 */
+export function pickApple(s: GameState, day: number): boolean {
   const order = APPLES.map((a, i) => i).sort((a, b) => APPLES[b].y - APPLES[a].y);
   const i = order.find((k) => s.apples[k]);
   if (i === undefined) return false;
   s.apples[i] = false;
+  s.applePicked[i] = day;
   s.inv.goods.apple++;
   return true;
 }

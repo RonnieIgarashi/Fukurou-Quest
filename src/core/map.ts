@@ -14,7 +14,7 @@ export type AreaId = 'village' | 'hut' | 'smithy' | 'forest';
  * - look：見るだけ（説明の台詞は story.ts の LOOK）
  * - bed / desk / forge / plot / barrel：タスクを選ぶ（barrel は水くみ場の樽）
  */
-export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot' | 'barrel' | 'log' | 'appleTree';
+export type SpotKind = 'enter' | 'exit' | 'look' | 'bed' | 'desk' | 'forge' | 'plot' | 'barrel' | 'log' | 'appleTree' | 'sack';
 
 export interface Spot {
   kind: SpotKind;
@@ -559,7 +559,10 @@ const HUT: Area = {
       [560, 705],
       [420, 705],
       [330, 662],
-      [300, 600],
+      // 玄関を入ってすぐ左、木箱（布袋）の手前の床まで（2026-11-21）
+      [274, 632],
+      [262, 588],
+      [292, 540],
       [300, 520],
     ],
   ],
@@ -575,7 +578,11 @@ const HUT: Area = {
     { spot: { kind: 'exit', id: 'village' }, poly: rect(380, 668, 545, 720) },
     { spot: { kind: 'bed' }, poly: rect(470, 420, 640, 492) },
     { spot: { kind: 'desk' }, poly: rect(728, 420, 830, 502) },
-    { spot: { kind: 'look', id: 'hutStairs' }, poly: rect(270, 420, 330, 600) },
+    // 【暫定】木箱の上の布袋：白のマナを1日3つ取り出せる（2026-11-21 Ronnie）
+    // 階段の下（y545 より手前）は、左を向くと布袋に届く
+    { spot: { kind: 'sack' }, poly: rect(150, 450, 262, 545) },
+    { spot: { kind: 'sack' }, poly: rect(150, 545, 292, 615) },
+    { spot: { kind: 'look', id: 'hutStairs' }, poly: rect(263, 420, 330, 545) },
     { spot: { kind: 'look', id: 'hutTable' }, poly: rect(510, 540, 690, 640) },
   ],
   // 家具の輪郭どおりに切り抜いて、奥にいる人物の上に重ねる（前後は下端の形で決める）

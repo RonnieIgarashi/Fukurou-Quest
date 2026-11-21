@@ -35,6 +35,7 @@ export const TASK_MINUTES = {
   feedMana: 5, // 畑にマナをあげる
   gatherWood: 30, // 森の倒木から薪を取る
   pickApple: 5, // リンゴを1つもぐ
+  takeWhite: 2, // 布袋から白のマナを取り出す
   eat: 10, // 食べる
 } as const;
 
@@ -131,6 +132,12 @@ export const NAME_MAX = 6;
 /** 【仮】セーブスロットの数 */
 export const SAVE_SLOTS = 3;
 
+/**
+ * 【暫定】家の中の布袋から取り出せる白のマナ（1日の数）。0時をすぎると補充される。
+ * 白のマナを手に入れる方法がまだ無いための仮の手当て（2026-11-21 Ronnie）
+ */
+export const SACK = { WHITE_PER_DAY: 3 } as const;
+
 /** 【仮】森の倒木から取れる薪（1回に取れる数・1日に取れる数。2026-11-20） */
 export const FOREST = {
   WOOD_PER_GATHER: 1,
@@ -150,8 +157,10 @@ export const FORAGE = {
   NOON: 14 * MINUTES_PER_HOUR,
   /** 拾える距離（足元から） */
   REACH: 26,
-  /** リンゴは毎朝この数だけ実る（木には12個まで） */
-  APPLES_PER_DAY: 2,
+  /** リンゴは、もいでからこの日数たつと、また実る（2026-11-21 Ronnie） */
+  APPLE_REGROW_DAYS: 10,
+  /** 拾わずにいると消えるまでの日数（2026-11-21 Ronnie：マナ2日・魚1日） */
+  LIFE_DAYS: { 'mana:water': 2, 'mana:earth': 2, 'mana:wind': 2, fish: 1 } as Record<string, number>,
   /** リンゴを食べると減る空腹 */
   APPLE_HUNGER: 25,
 } as const;

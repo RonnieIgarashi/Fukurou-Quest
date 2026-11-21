@@ -1,8 +1,8 @@
 // タスク（行動）。実行すると効果を反映し、所要時間ぶん advance() で時間をまとめて進める。
 import { dayOf, formatClock, minuteOfDay } from './clock.js';
 import { Spot } from './map.js';
-import { applesOnTree, pickApple } from './forage.js';
-import { CropId, CROPS, FARM_MANA_PER_PLOT_PER_DAY, FORAGE, FOREST, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, TASK_MINUTES, TIME, WATER } from './params.js';
+import { applesOnTree, nextAppleDay, pickApple } from './forage.js';
+import { CropId, CROPS, FARM_MANA_PER_PLOT_PER_DAY, FORAGE, FOREST, FORGE, FUELS, GOODS, GoodsId, MINUTES_PER_HOUR, SACK, TASK_MINUTES, TIME, WATER } from './params.js';
 import { advance, GameEvent, sleepUntilMorning } from './sim.js';
 import { FARM_MANA, GameState, MANA_IDS, MANA_NAMES } from './state.js';
 
@@ -51,6 +51,12 @@ export function carriedWater(s: GameState): number {
 export function harvestYield(crop: CropId, pureDays: number): number {
   const c = CROPS[crop];
   return c.yield + Math.round(c.yield * WATER.PURE_YIELD_BONUS * Math.min(1, pureDays / c.days));
+}
+
+/** 【暫定】今日、布袋からあと何個の白のマナを取り出せるか（0時をすぎると補充） */
+export function sackLeft(s: GameState): number {
+  const taken = s.sack.day === dayOf(s.clock) ? s.sack.taken : 0;
+  return Math.max(0, SACK.WHITE_PER_DAY - taken);
 }
 
 /** 今日、倒木からあと何本の薪を取れるか */
@@ -164,10 +170,20 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
     case 'appleTree': {
       const n = applesOnTree(s);
       return [
-        { id: 'pickApple', label: `リンゴをもぐ（木に${n}個）`, minutes: TASK_MINUTES.pickApple, disabled: n <= 0 ? 'いまは実がない（毎朝いくつか実る）' : null },
+        { id: 'pickApple', label: `リンゴをもぐ（木に${n}個）`, minutes: TASK_MINUTES.pickApple, disabled: n <= 0 ? appleWait(s) : null },
         { id: 'lookApple', label: '様子を見る', minutes: 0, disabled: null },
       ];
     }
+    case 'sack':
+      return [
+        {
+          id: 'takeWhite',
+          label: `白のマナを取り出す（あと${sackLeft(s)}個）`,
+          minutes: TASK_MINUTES.takeWhite,
+          disabled: sackLeft(s) <= 0 ? '今日の分はもう取り出した（夜中の0時をすぎると、また入っている）' : null,
+        },
+        { id: 'lookSack', label: '様子を見る', minutes: 0, disabled: null },
+      ];
     case 'log':
       return [
         {
@@ -184,6 +200,14 @@ export function optionsFor(s: GameState, spot: Spot): TaskOption[] {
     case 'look':
       return [];
   }
+}
+
+/** リンゴの実が無いときの案内（いつ、また実るか） */
+function appleWait(s: GameState): string {
+  const d = nextAppleDay(s);
+  if (d === null) return 'いまは実がない';
+  const left = d - dayOf(s.clock);
+  return left <= 1 ? 'いまは実がない（明日の朝には、また実りそうだ）' : `いまは実がない（あと${left}日ほどで、また実りそうだ）`;
 }
 
 function plotStatus(s: GameState, spot: Spot): string {
@@ -286,12 +310,12 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     pass(TASK_MINUTES.feedMana);
     messages.push(`地・火・風のマナを${FARM_MANA_PER_PLOT_PER_DAY}つずつ、畑にあげた。（のこり ${manaLine(s)}）`);
   } else if (id === 'pickApple') {
-    pickApple(s);
+    pickApple(s, dayOf(s.clock));
     pass(TASK_MINUTES.pickApple);
     messages.push(`リンゴを1つもいだ。（リンゴ ${s.inv.goods.apple}）`);
   } else if (id === 'lookApple') {
     const n = applesOnTree(s);
-    messages.push(n > 0 ? `リンゴの木だ。赤い実が${n}個なっている。` : 'リンゴの木だ。いまは実がない。毎朝いくつか実るようだ。');
+    messages.push(n > 0 ? `リンゴの木だ。赤い実が${n}個なっている。もいだ所には、10日ほどでまた実がなる。` : `リンゴの木だ。${appleWait(s)}。`);
   } else if (id === 'gatherWood') {
     const day = dayOf(s.clock);
     if (s.forest.woodDay !== day) s.forest = { woodDay: day, woodTaken: 0 };
@@ -299,6 +323,16 @@ export function runTask(s: GameState, spot: Spot, id: string): TaskResult {
     s.inv.goods.wood += FOREST.WOOD_PER_GATHER;
     pass(TASK_MINUTES.gatherWood);
     messages.push(`倒木の枝を折って、薪を${FOREST.WOOD_PER_GATHER}本手に入れた。（薪 ${s.inv.goods.wood}）`);
+  } else if (id === 'takeWhite') {
+    const day = dayOf(s.clock);
+    const n = sackLeft(s);
+    if (s.sack.day !== day) s.sack = { day, taken: 0 };
+    s.sack.taken += n;
+    s.inv.mana.white += n;
+    pass(TASK_MINUTES.takeWhite);
+    messages.push(`布袋から白のマナを${n}つ取り出した。（白のマナ ${s.inv.mana.white}）`);
+  } else if (id === 'lookSack') {
+    messages.push(sackLeft(s) > 0 ? `木箱の上の布袋だ。白のマナが${sackLeft(s)}つ入っている。` : '木箱の上の布袋だ。いまは空っぽだ。夜中の0時をすぎると、なぜかまた入っている。');
   } else if (id === 'lookLog') {
     messages.push('古い倒木だ。よく乾いていて、薪にちょうどいい。');
   } else if (id === 'drink') {

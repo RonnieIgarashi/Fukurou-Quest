@@ -71,8 +71,15 @@ export function migrate(raw: unknown): SaveFile | null {
     },
     body: { ...base.body, ...(g.body ?? {}) },
     forest: { ...base.forest, ...(g.forest ?? {}) },
-    pickups: Array.isArray(g.pickups) ? g.pickups : base.pickups,
+    // 落ちた時刻の無い物（v0.9.2 まで）は、読み込んだ時刻に落ちたことにする
+    pickups: Array.isArray(g.pickups) ? g.pickups.map((p) => ({ ...p, at: typeof p.at === 'number' ? p.at : g.clock! })) : base.pickups,
     apples: Array.isArray(g.apples) && g.apples.length === base.apples.length ? g.apples : base.apples,
+    // もいだ日の無い所（v0.9.2 まで）は、読み込んだ日にもいだことにする
+    applePicked:
+      Array.isArray(g.applePicked) && g.applePicked.length === base.applePicked.length
+        ? g.applePicked
+        : base.applePicked.map(() => dayOf(g.clock!)),
+    sack: { ...base.sack, ...(g.sack ?? {}) },
     forge: { ...base.forge, ...(g.forge ?? {}) },
     companions: {
       moku: { ...base.companions.moku, ...(g.companions?.moku ?? {}), ...(schema < 2 ? { x: base.companions.moku.x, y: base.companions.moku.y } : {}) },
