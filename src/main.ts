@@ -874,14 +874,19 @@ function drawHud(ctx: Ctx, clock: number): void {
   const w = 5 * 30 + 8;
   const x0 = BASE_W - 6 - w;
   drawFrame(ctx, x0, 6, w, 18, 0.8);
+  // 枠を5つのます（30px）に分け、各ますの中で「絵＋数」を上下左右とも真ん中に置く（2026-11-21 Ronnie）
+  const cy = 6 + 18 / 2;
+  const ICON = 13;
   MANA_IDS.forEach((m, i) => {
-    const x = x0 + 6 + i * 30;
-    // Ronnie のマナの絵（読み込み前は色の玉）
+    const num = String(game.inv.mana[m]);
+    const nw = screen.textWidth(num, 9);
+    const cx = x0 + 4 + i * 30 + 15;
+    const left = cx - (ICON + 1 + nw) / 2;
+    // Ronnie のマナの絵（重心が真ん中の正方形。tools/extract_items.py）。読み込み前は色の玉
     const img = itemArt(`mana-${m}`);
-    // マナの絵は重心が真ん中の正方形（tools/extract_items.py）。余白があるので枠は少し大きめ
-    if (img) screen.image(img, ...fitBox(img, x - 3, 7, 13, 13));
-    else drawOrb(ctx, x, 11, MANA_COLORS[m]);
-    screen.text(x + 10, 10, String(game.inv.mana[m]), { size: 9 });
+    if (img) screen.image(img, ...fitBox(img, left, cy - ICON / 2, ICON, ICON));
+    else drawOrb(ctx, left + 2, cy - 4, MANA_COLORS[m]);
+    screen.text(left + ICON + 1, cy - 4.5, num, { size: 9 });
   });
 }
 
