@@ -987,10 +987,14 @@ function pickupDrawable(kind: keyof typeof PICKUP_NAMES, x: number, y: number, t
       const img = itemArt(icon);
       const bob = kind === 'fish' ? 0 : Math.sin(t * 2.4 + x * 0.05) * 1.5 - 2;
       drawShadow(c, x, y, 16);
-      if (img) {
-        const h = kind === 'fish' ? 15 : 18;
+      if (img && kind === 'fish') {
+        const h = 15;
         const w = (img.naturalWidth / img.naturalHeight) * h;
         c.drawImage(img, x - w / 2, y - h + bob, w, h);
+      } else if (img) {
+        // マナの絵は重心が真ん中の正方形（余白つき）。中心を足元の少し上に置く
+        const s = 22;
+        c.drawImage(img, x - s / 2, y - 10 - s / 2 + bob, s, s);
       }
       const k = Math.max(0, Math.sin(t * 1.7 + x));
       if (k > 0.9) {

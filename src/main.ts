@@ -878,7 +878,8 @@ function drawHud(ctx: Ctx, clock: number): void {
     const x = x0 + 6 + i * 30;
     // Ronnie のマナの絵（読み込み前は色の玉）
     const img = itemArt(`mana-${m}`);
-    if (img) screen.image(img, ...fitBox(img, x - 2, 8, 11, 11));
+    // マナの絵は重心が真ん中の正方形（tools/extract_items.py）。余白があるので枠は少し大きめ
+    if (img) screen.image(img, ...fitBox(img, x - 3, 7, 13, 13));
     else drawOrb(ctx, x, 11, MANA_COLORS[m]);
     screen.text(x + 10, 10, String(game.inv.mana[m]), { size: 9 });
   });
@@ -1001,7 +1002,9 @@ function drawMenu(ctx: Ctx): void {
       const sel = i === m.idx;
       if (sel && m.act === null) drawCursor(ctx, 46, y + 3, t);
       const img = it.icon ? itemArt(it.icon) : null;
-      if (img) screen.image(img, ...fitBox(img, 56, y - 1, 13, 13));
+      // マナの絵は余白つきの正方形なので、ひと回り大きい枠に描く（中心は同じ）
+      const big = it.icon?.startsWith('mana-') ? 2 : 0;
+      if (img) screen.image(img, ...fitBox(img, 56 - big, y - 1 - big, 13 + 2 * big, 13 + 2 * big));
       screen.text(72, y, it.name, { size: 10, color: sel ? '#ffe066' : '#f4f0ff' });
       screen.text(280, y, it.count, { size: 10, align: 'right', color: '#b8b0e0' });
     });

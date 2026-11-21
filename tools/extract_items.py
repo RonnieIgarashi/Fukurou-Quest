@@ -38,14 +38,45 @@ ITEMS = {
 }
 
 
+def mass(rgba):
+    """重心 (cy, cx)・重心から最も遠い点までの距離・広がり（重心からの距離の二乗平均の平方根）"""
+    a = rgba[:, :, 3].astype(np.float64)
+    ys, xs = np.mgrid[0:a.shape[0], 0:a.shape[1]]
+    cy, cx = (a * ys).sum() / a.sum(), (a * xs).sum() / a.sum()
+    d2 = (ys - cy) ** 2 + (xs - cx) ** 2
+    rmax = np.sqrt(d2[a > 8].max())
+    rms = np.sqrt((a * d2).sum() / a.sum())
+    return cy, cx, rmax, rms
+
+
+def centered_square(rgba, ratio):
+    """絵の重心（不透明さの重み付き）を真ん中にした正方形に置き直す。
+
+    マナは形がまちまち（横長の炎・風、下に影のある水・白）で、外枠の中央でそろえると上下にずれて見えるため
+    （2026-11-21 Ronnie）。辺は「広がり × ratio」で、ratio はどのマナも絵が切れない最小の値にそろえる
+    （正方形に同じ大きさで描けば、どのマナも見た目の大きさがそろう）。
+    """
+    a = rgba[:, :, 3]
+    cy, cx, _, rms = mass(rgba)
+    side = int(np.ceil(ratio * rms)) + 2
+    out = np.zeros((side, side, 4), dtype=rgba.dtype)
+    oy, ox = int(round(side / 2 - cy)), int(round(side / 2 - cx))
+    out[oy:oy + a.shape[0], ox:ox + a.shape[1]] = rgba
+    return out
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     extract_sprites.OUT = OUT
     rgb = np.asarray(Image.open(SRC).convert('RGB')).astype(np.float32)
     fg = foreground(rgb.astype(np.int16))
     lab, _ = ndimage.label(ndimage.binary_dilation(fg, iterations=3))
-    for name, box in ITEMS.items():
-        save(cut(rgb, fg, lab, box), 1.0, name)
+    cuts = {name: cut(rgb, fg, lab, box) for name, box in ITEMS.items()}
+    ratio = max(2 * m[2] / m[3] for m in (mass(c) for n, c in cuts.items() if n.startswith('mana-')))
+    for name, rgba in cuts.items():
+        if name.startswith('mana-'):
+            rgba = centered_square(rgba, ratio)
+        save(rgba, 1.0, name)
 
 
 if __name__ == '__main__':
